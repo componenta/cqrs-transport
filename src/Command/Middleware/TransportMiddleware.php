@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\Command\Middleware;
 
-use Componenta\CQRS\Command\Attribute\Async;
-use Componenta\CQRS\Command\Metadata\CommandAttributeProviderInterface;
-use Componenta\CQRS\Command\Metadata\ReflectionCommandAttributeProvider;
+use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
+use Componenta\CQRS\Command\Metadata\ReflectionCommandMetadataProvider;
 use Componenta\CQRS\Command\OperationInterface;
 use Componenta\CQRS\Command\Transport\CommandSerializerInterface;
 use Componenta\CQRS\Command\Transport\Envelope;
 use Componenta\CQRS\Command\Transport\ExecutionMode;
 use Componenta\CQRS\Command\Transport\TransportRegistryInterface;
+use Componenta\CQRS\Transport\Attribute\Async;
 
 /**
  * Sends commands marked with #[Async] to transport.
@@ -44,14 +44,14 @@ final readonly class TransportMiddleware implements MiddlewareInterface
      */
     public const string ATTR_EXECUTION_MODE = '__execution_mode';
 
-    private CommandAttributeProviderInterface $attributes;
+    private CommandMetadataProviderInterface $metadata;
 
     public function __construct(
         private TransportRegistryInterface $transports,
         private CommandSerializerInterface $serializer,
-        ?CommandAttributeProviderInterface $attributes = null,
+        ?CommandMetadataProviderInterface $metadata = null,
     ) {
-        $this->attributes = $attributes ?? new ReflectionCommandAttributeProvider();
+        $this->metadata = $metadata ?? new ReflectionCommandMetadataProvider();
     }
 
     public function execute(OperationInterface $operation, OperationHandlerInterface $handler): OperationInterface
@@ -63,7 +63,7 @@ final readonly class TransportMiddleware implements MiddlewareInterface
             return $handler->handle($operation);
         }
 
-        $async = $this->attributes->async($operation->command);
+        $async = $this->metadata->get($operation->command, Async::class);
 
         if ($async === null) {
             return $handler->handle($operation)
