@@ -10,6 +10,8 @@ use Componenta\CQRS\Command\Transport\CommandSerializerInterface;
 use Componenta\CQRS\Command\Transport\CommandWorker;
 use Componenta\CQRS\Command\Transport\Envelope;
 use Componenta\CQRS\Command\Transport\ExecutionMode;
+use Componenta\CQRS\Command\Transport\TransportDispositionException;
+use Componenta\CQRS\Command\Transport\TransportException;
 use Componenta\CQRS\Command\Transport\TransportInterface;
 
 it('re-dispatches transported commands with worker attributes', function (): void {
@@ -85,7 +87,7 @@ it('re-dispatches transported commands with worker attributes', function (): voi
     expect($worker->processOne())->toBeTrue()
         ->and($bus->command)->toBe($command)
         ->and($bus->attributes)->toMatchArray([
-            CommandWorker::ATTR_SKIP_POLICY => true,
+            CommandWorker::ATTR_ORIGINAL_OPERATION_ID => 'operation-id',
             TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::SYNC,
         ])
         ->and($transport->acks)->toBe(1)
@@ -148,9 +150,9 @@ it('merges custom worker dispatch attributes and keeps sync execution mode autho
     $worker->processOne();
 
     expect($bus->attributes)->toBe([
-        CommandWorker::ATTR_SKIP_POLICY => true,
         'tenant' => 'main',
         TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::SYNC,
+        CommandWorker::ATTR_ORIGINAL_OPERATION_ID => 'operation-id',
     ]);
 });
 

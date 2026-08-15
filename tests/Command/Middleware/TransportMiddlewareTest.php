@@ -104,3 +104,67 @@ it('uses the generic metadata provider to route asynchronous commands', function
         ->and($result->attributes[TransportMiddleware::ATTR_EXECUTION_MODE])
         ->toBe(ExecutionMode::ASYNC);
 });
+
+it('rejects invalid asynchronous transport declarations', function (Closure $create): void {
+    expect($create)->toThrow(InvalidArgumentException::class);
+})->with([
+    'empty transport' => [fn() => new Async('  ')],
+    'negative delay' => [fn() => new Async(delay: -1)],
+]);
+
+it('adds synchronous execution mode only after downstream returns', function (): void {
+    $registry = new class implements TransportRegistryInterface {
+        public function get(string $name): TransportInterface
+        {
+            throw new RuntimeException('A synchronous command must not resolve a transport.');
+        }
+
+        public function has(string $name): bool
+        {
+            return false;
+        }
+    };
+    $serializer = new class implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            throw new RuntimeException('A synchronous command must not be serialized.');
+        }
+
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            throw new RuntimeException('Not used.');
+        }
+    };
+    $metadata = new class implements CommandMetadataProviderInterface {
+        public function get(object|string $command, string $attribute): ?object
+        {
+            return null;
+        }
+
+        public function isKnown(object|string $command): bool
+        {
+            return true;
+        }
+    };
+    $handler = new class implements OperationHandlerInterface {
+        public mixed $observedMode = 'not-called';
+
+        public function handle(OperationInterface $operation): OperationInterface
+        {
+            $this->observedMode = $operation->attributes[
+                TransportMiddleware::ATTR_EXECUTION_MODE
+            ] ?? null;
+
+            return $operation;
+        }
+    };
+
+    $result = (new TransportMiddleware($registry, $serializer, $metadata))->execute(
+        Operation::create(new stdClass()),
+        $handler,
+    );
+
+    expect($handler->observedMode)->toBeNull()
+        ->and($result->attributes[TransportMiddleware::ATTR_EXECUTION_MODE])
+        ->toBe(ExecutionMode::SYNC);
+});

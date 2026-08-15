@@ -5,8 +5,8 @@
     "license": "MIT",
     "require": {
         "php": ">=8.4",
-        "componenta/config": "^2.0",
-        "componenta/cqrs": "^2.0",
+        "componenta/config": "^2.0.1",
+        "componenta/cqrs": "^2.0 || ^3.0",
         "psr/container": "^2.0",
         "psr/log": "^3.0"
     },
