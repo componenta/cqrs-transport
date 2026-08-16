@@ -6,54 +6,33 @@ Async transport middleware, transport contracts, JSON command serializer, regist
 composer require componenta/cqrs-transport
 ```
 
-Register the provider after the core CQRS provider. The package deliberately does not choose transports or a serializer for the application: bind `TransportRegistryInterface` and `CommandSerializerInterface`, and register at least the named transports the application uses.
+Register the provider after the core CQRS provider. The package deliberately does not choose transports or a serializer for the application: bind `TransportRegistryInterface` and `CommandSerializerInterface`, and register the named transports the application uses.
+
+The package provides `TransportMiddleware`, `TransportInterface`, `TransportRegistryInterface`, `CommandSerializerInterface`, and `CommandWorker`.
+
+## Worker deserialization boundary
+
+The normal `CommandWorker` constructor is fail-closed and requires a complete `CommandMetadataProviderInterface`. The envelope-selected class is checked before `class_exists()` and before serializer hydration:
 
 ```php
-return [
-    new Componenta\CQRS\ConfigProvider(),
-    new Componenta\CQRS\Transport\ConfigProvider(),
-];
+$worker = new CommandWorker(
+    bus: $commandBus,
+    serializer: $serializer,
+    transport: $transport,
+    commands: $compiledCommandMetadata,
+);
 ```
 
-A minimal application provider may select the bundled implementations:
+For an integrity-protected transport whose producers are all trusted, unrestricted behavior must be selected explicitly:
 
 ```php
-protected function getAliases(): array
-{
-    return [
-        Componenta\CQRS\Command\Transport\CommandSerializerInterface::class
-            => Componenta\CQRS\Command\Transport\JsonCommandSerializer::class,
-        Componenta\CQRS\Command\Transport\TransportRegistryInterface::class
-            => Componenta\CQRS\Command\Transport\TransportRegistry::class,
-    ];
-}
+$worker = CommandWorker::unsafe($commandBus, $serializer, $transport);
 ```
 
-The registry still needs configured `TransportInterface` instances. The package provider registers `Async` in `ConfigKey::COMMAND_METADATA_ATTRIBUTES`; `componenta/cqrs-app` therefore compiles it without a transport-specific compiler.
+Do not use the unsafe factory for queues writable by a less-trusted actor. A compiled metadata provider avoids reflection and autoload work while checking the allowlist.
 
-The package provides:
+The worker sets `ExecutionMode::SYNC` before dispatch and exposes the producer ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`. It does not skip policy automatically. Put policy before transport to authorize before enqueue, or provide a trusted worker policy context.
 
-- `Componenta\CQRS\Command\Middleware\TransportMiddleware`
-- `Componenta\CQRS\Command\Transport\TransportInterface`
-- `Componenta\CQRS\Command\Transport\TransportRegistryInterface`
-- `Componenta\CQRS\Command\Transport\CommandSerializerInterface`
+Transport outside `SequentialMiddleware` can publish a nested async command before the parent transaction commits. Use an outbox for durable cross-system delivery.
 
-For a direct non-async dispatch, `ExecutionMode::SYNC` is attached to the returned
-operation after downstream middleware completes; inner middleware does not see
-that marker. A worker sets `SYNC` before dispatch and also exposes the producer
-ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`.
-
-The worker no longer skips policy automatically. Put policy before transport to
-authorize before enqueue, or explicitly provide a trusted worker policy context.
-If `CommandMetadataProviderInterface` is passed to `CommandWorker`, an unknown
-command class is rejected before deserialization and constructor hydration. A
-compiled metadata provider also makes this check before autoload; a reflection
-fallback may autoload while evaluating `isKnown()`. The console integration
-
-Transport outside `SequentialMiddleware` can publish a nested async command
-before the parent transaction commits. Middleware order is not a generic
-DB/queue atomicity guarantee; use an outbox for durable cross-system delivery.
-
-- `Componenta\CQRS\Command\Transport\CommandWorker`
-
-For a Cycle Database transport, install `componenta/cqrs-transport-cycle`. For the Symfony Console worker command, install `componenta/cqrs-transport-console`.
+For Cycle Database transport install `componenta/cqrs-transport-cycle`; for the Symfony Console worker install `componenta/cqrs-transport-console`.

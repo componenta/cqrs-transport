@@ -14,11 +14,7 @@ use ReflectionType;
 use ReflectionUnionType;
 use Throwable;
 
-/**
- * JSON-based command serializer.
- *
- * Serializes public properties to JSON. Deserializes via constructor.
- */
+/** JSON serializer for public stored constructor-backed command state. */
 final readonly class JsonCommandSerializer implements CommandSerializerInterface
 {
     public const int FORMAT_VERSION = 1;
@@ -62,7 +58,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         $reflection = new ReflectionClass($commandClass);
-
         if (!$reflection->isInstantiable()) {
             throw new TransportException("Command class '{$commandClass}' must be instantiable.");
         }
@@ -78,21 +73,24 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             return $this->instantiate($reflection, []);
         }
 
-        $args = [];
+        $arguments = [];
         $remaining = $data;
 
         foreach ($parameters as $name => $parameter) {
             if (array_key_exists($name, $data)) {
                 $value = $data[$name];
                 $this->assertParameterType($value, $parameter, $commandClass);
-
-                $args[] = $value;
+                $arguments[] = $value;
                 unset($remaining[$name]);
-            } elseif ($parameter->isDefaultValueAvailable()) {
-                $args[] = $parameter->getDefaultValue();
-            } else {
-                throw new TransportException("Missing required parameter '{$name}' for {$commandClass}.");
+                continue;
             }
+
+            if ($parameter->isDefaultValueAvailable()) {
+                $arguments[] = $parameter->getDefaultValue();
+                continue;
+            }
+
+            throw new TransportException("Missing required parameter '{$name}' for {$commandClass}.");
         }
 
         if ($remaining !== []) {
@@ -103,13 +101,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             ));
         }
 
-        return $this->instantiate($reflection, $args);
+        return $this->instantiate($reflection, $arguments);
     }
 
-    /**
-     * @param ReflectionClass<object> $reflection
-     * @return array<string, mixed>
-     */
+    /** @param ReflectionClass<object> $reflection @return array<string, mixed> */
     private function extractConstructorData(ReflectionClass $reflection, object $command): array
     {
         $parameters = $this->constructorParameters($reflection);
@@ -137,20 +132,15 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         return $data;
     }
 
-    /**
-     * @param ReflectionClass<object> $reflection
-     * @return array<string, ReflectionParameter>
-     */
+    /** @param ReflectionClass<object> $reflection @return array<string, ReflectionParameter> */
     private function constructorParameters(ReflectionClass $reflection): array
     {
         $constructor = $reflection->getConstructor();
-
         if ($constructor === null) {
             return [];
         }
 
         $parameters = [];
-
         foreach ($constructor->getParameters() as $parameter) {
             if ($parameter->isVariadic() || $parameter->isPassedByReference()) {
                 throw new TransportException(sprintf(
@@ -181,7 +171,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             }
 
             $name = $property->getName();
-
             if (!array_key_exists($name, $parameters)) {
                 throw new TransportException(sprintf(
                     'Command property "%s::$%s" is not represented by a constructor parameter.',
@@ -269,9 +258,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             ));
         }
 
-        if (count($decoded) !== 2
-            || !array_key_exists(self::DATA_KEY, $decoded)
-        ) {
+        if (count($decoded) !== 2 || !array_key_exists(self::DATA_KEY, $decoded)) {
             throw new TransportException('Invalid versioned command payload envelope.');
         }
 
@@ -281,9 +268,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         );
     }
 
-    /**
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     private function jsonObject(mixed $value, string $error): array
     {
         if (!is_array($value)) {
@@ -291,7 +276,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         $object = [];
-
         foreach ($value as $key => $item) {
             if (!is_string($key)) {
                 throw new TransportException($error);
@@ -302,11 +286,9 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
 
         return $object;
     }
-    private function assertParameterType(
-        mixed $value,
-        ReflectionParameter $parameter,
-        string $commandClass,
-    ): void {
+
+    private function assertParameterType(mixed $value, ReflectionParameter $parameter, string $commandClass): void
+    {
         $type = $parameter->getType();
 
         if ($type === null || $this->matchesType($value, $type)) {
@@ -324,13 +306,16 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
 
     private function matchesType(mixed $value, ReflectionType $type): bool
     {
+        if ($value === null && $type->allowsNull()) {
+            return true;
+        }
+
         if ($type instanceof ReflectionUnionType) {
             foreach ($type->getTypes() as $member) {
                 if ($this->matchesType($value, $member)) {
                     return true;
                 }
             }
-
             return false;
         }
 
@@ -340,7 +325,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                     return false;
                 }
             }
-
             return true;
         }
 
@@ -363,11 +347,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         };
     }
 
-
-    /**
-     * @param ReflectionClass<object> $reflection
-     * @param list<mixed> $arguments
-     */
+    /** @param ReflectionClass<object> $reflection @param list<mixed> $arguments */
     private function instantiate(ReflectionClass $reflection, array $arguments): object
     {
         try {

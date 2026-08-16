@@ -12,23 +12,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
 
-/**
- * Processes commands from transport.
- *
- * @example
- * ```php
- * $worker = new CommandWorker($bus, $serializer, $transport, $logger);
- *
- * // Process single command
- * $worker->processOne();
- *
- * // Run continuously
- * $worker->run(sleep: 5);
- *
- * // Graceful shutdown (from signal handler)
- * $worker->stop();
- * ```
- */
+/** Processes commands from transport. */
 final class CommandWorker
 {
     public const string ATTR_SKIP_POLICY = '__skip_policy';
@@ -36,11 +20,15 @@ final class CommandWorker
 
     private bool $shouldStop = false;
     private readonly LoggerInterface $logger;
+    private readonly CommandMetadataProviderInterface $commands;
 
     /** @var array<string, mixed> */
     private readonly array $dispatchAttributes;
 
     /**
+     * The safe constructor is fail-closed: a complete command metadata provider
+     * is required before any envelope-selected class can be deserialized.
+     *
      * @param array<string, mixed> $dispatchAttributes Extra attributes passed to command re-dispatch.
      */
     public function __construct(
@@ -49,19 +37,45 @@ final class CommandWorker
         private readonly TransportInterface $transport,
         ?LoggerInterface $logger = null,
         array $dispatchAttributes = [],
-        private readonly ?CommandMetadataProviderInterface $commands = null,
+        ?CommandMetadataProviderInterface $commands = null,
     ) {
+        if ($commands === null) {
+            throw new InvalidArgumentException(sprintf(
+                '%s requires a complete %s allowlist; use %s::unsafe() only for an integrity-protected trusted transport.',
+                self::class,
+                CommandMetadataProviderInterface::class,
+                self::class,
+            ));
+        }
+
         $this->logger = $logger ?? new NullLogger();
         $this->dispatchAttributes = $dispatchAttributes;
+        $this->commands = $commands;
     }
 
     /**
-     * Processes single command from transport.
+     * Explicitly disables command-class allowlisting.
      *
-     * @return bool True if command was processed, false if transport is empty
-     *
-     * @phpstan-impure
+     * @param array<string, mixed> $dispatchAttributes
      */
+    public static function unsafe(
+        CommandBusInterface $bus,
+        CommandSerializerInterface $serializer,
+        TransportInterface $transport,
+        ?LoggerInterface $logger = null,
+        array $dispatchAttributes = [],
+    ): self {
+        return new self(
+            $bus,
+            $serializer,
+            $transport,
+            $logger,
+            $dispatchAttributes,
+            new UnsafeCommandMetadataProvider(),
+        );
+    }
+
+    /** @phpstan-impure */
     public function processOne(): bool
     {
         $envelope = $this->transport->get();
@@ -71,9 +85,7 @@ final class CommandWorker
         }
 
         try {
-            if ($this->commands !== null
-                && !$this->commands->isKnown($envelope->commandClass)
-            ) {
+            if (!$this->commands->isKnown($envelope->commandClass)) {
                 throw new TransportException(sprintf(
                     'Transported command class "%s" is not present in the configured CQRS command map.',
                     $envelope->commandClass,
@@ -89,6 +101,7 @@ final class CommandWorker
                 $envelope->payload,
                 $commandClass,
             );
+
             if (!$command instanceof $commandClass) {
                 throw new TransportException(sprintf(
                     'Deserializer returned %s for transported command class %s.',
@@ -162,11 +175,6 @@ final class CommandWorker
         }
     }
 
-    /**
-     * Runs worker loop until stopped.
-     *
-     * @param int $sleep Seconds to sleep when transport is empty
-     */
     public function run(int $sleep = 1): void
     {
         $this->shouldStop = false;
@@ -184,13 +192,8 @@ final class CommandWorker
         }
     }
 
-    /**
-     * Signals worker to stop after current command.
-     */
     public function stop(): void
     {
         $this->shouldStop = true;
     }
 }
-
-
