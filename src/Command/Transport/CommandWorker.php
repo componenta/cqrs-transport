@@ -15,7 +15,6 @@ use Throwable;
 /** Processes commands from transport. */
 final class CommandWorker
 {
-    public const string ATTR_SKIP_POLICY = '__skip_policy';
     public const string ATTR_ORIGINAL_OPERATION_ID = '__original_operation_id';
 
     private bool $shouldStop = false;
