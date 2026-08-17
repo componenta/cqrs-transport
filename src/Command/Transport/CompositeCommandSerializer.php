@@ -34,7 +34,7 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
     public function supportsCommand(object|string $command): bool
     {
         foreach ($this->serializers as $serializer) {
-            if ($serializer->supportsCommand($command)) {
+            if ($this->supports($serializer, $command)) {
                 return true;
             }
         }
@@ -59,7 +59,7 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
     private function serializerFor(object|string $command): CommandSerializerInterface&CommandSerializerSupportInterface
     {
         foreach ($this->serializers as $serializer) {
-            if ($serializer->supportsCommand($command)) {
+            if ($this->supports($serializer, $command)) {
                 return $serializer;
             }
         }
@@ -68,5 +68,32 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
             'No command serializer supports %s.',
             is_object($command) ? $command::class : $command,
         ));
+    }
+
+    /**
+     * @param CommandSerializerInterface&CommandSerializerSupportInterface $serializer
+     * @param object|class-string $command
+     */
+    private function supports(
+        CommandSerializerInterface&CommandSerializerSupportInterface $serializer,
+        object|string $command,
+    ): bool {
+        $supported = $serializer->supportsCommand($command);
+
+        if (!is_object($command)) {
+            return $supported;
+        }
+
+        $classSupported = $serializer->supportsCommand($command::class);
+
+        if ($supported !== $classSupported) {
+            throw new TransportException(sprintf(
+                'Command serializer %s has instance-dependent support for %s; supportsCommand() must return the same result for a command instance and its class.',
+                $serializer::class,
+                $command::class,
+            ));
+        }
+
+        return $supported;
     }
 }
