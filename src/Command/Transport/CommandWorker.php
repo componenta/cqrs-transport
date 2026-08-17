@@ -19,7 +19,6 @@ final class CommandWorker
 
     private bool $shouldStop = false;
     private readonly LoggerInterface $logger;
-    private readonly CommandMetadataProviderInterface $commands;
 
     /** @var array<string, mixed> */
     private readonly array $dispatchAttributes;
@@ -34,22 +33,12 @@ final class CommandWorker
         private readonly CommandBusInterface $bus,
         private readonly CommandSerializerInterface $serializer,
         private readonly TransportInterface $transport,
+        private readonly CommandMetadataProviderInterface $commands,
         ?LoggerInterface $logger = null,
         array $dispatchAttributes = [],
-        ?CommandMetadataProviderInterface $commands = null,
     ) {
-        if ($commands === null) {
-            throw new InvalidArgumentException(sprintf(
-                '%s requires a complete %s allowlist; use %s::unsafe() only for an integrity-protected trusted transport.',
-                self::class,
-                CommandMetadataProviderInterface::class,
-                self::class,
-            ));
-        }
-
         $this->logger = $logger ?? new NullLogger();
         $this->dispatchAttributes = $dispatchAttributes;
-        $this->commands = $commands;
     }
 
     /**
@@ -68,9 +57,9 @@ final class CommandWorker
             $bus,
             $serializer,
             $transport,
+            new UnsafeCommandMetadataProvider(),
             $logger,
             $dispatchAttributes,
-            new UnsafeCommandMetadataProvider(),
         );
     }
 
