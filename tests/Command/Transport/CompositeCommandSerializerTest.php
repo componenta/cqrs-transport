@@ -77,6 +77,28 @@ it('delegates serialization to the first supporting serializer', function (): vo
         ->and($second->serialized)->toBe([]);
 });
 
+it('preserves iterable order independently of iterable keys', function (): void {
+    $first = new CompositeRecordingSerializer(
+        CompositeSpecialCommand::class,
+        'first',
+        new CompositeSpecialCommand(10),
+    );
+    $second = new CompositeRecordingSerializer(
+        CompositeSpecialCommand::class,
+        'second',
+        new CompositeSpecialCommand(20),
+    );
+    $serializers = (static function () use ($first, $second): Generator {
+        yield 'preferred' => $first;
+        yield 'later' => $second;
+    })();
+    $composite = new CompositeCommandSerializer($serializers);
+
+    expect($composite->serialize(new CompositeSpecialCommand(1)))->toBe('first')
+        ->and($first->serialized)->toHaveCount(1)
+        ->and($second->serialized)->toBe([]);
+});
+
 it('uses class-based support selection before deserialization', function (): void {
     $result = new CompositeSpecialCommand(10);
     $serializer = new CompositeRecordingSerializer(
@@ -119,6 +141,10 @@ it('does not fall through after a supporting serializer fails', function (): voi
     expect(fn() => $composite->serialize(new CompositeSpecialCommand(1)))
         ->toThrow(TransportException::class, 'owned failure')
         ->and($fallback->serialized)->toBe([]);
+
+    expect(fn() => $composite->deserialize('wire', CompositeSpecialCommand::class))
+        ->toThrow(TransportException::class, 'owned failure')
+        ->and($fallback->deserialized)->toBe([]);
 });
 
 it('throws when no serializer supports the command', function (): void {
