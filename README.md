@@ -42,9 +42,28 @@ $serializer = new CompositeCommandSerializer([
 
 Selection must be stable for a command class. Serialization can pass an object, while deserialization has only the class name; therefore `supportsCommand($instance)` and `supportsCommand($instance::class)` must return the same result. A support predicate must not depend on actor value or other per-instance state.
 
+If one command class can carry several domain actor/value variants, a custom serializer cannot claim only selected instances of that class. It must own the whole command class and handle its supported wire variants itself, or the command types must be separated.
+
 `JsonCommandSerializer` implements the support interface and deliberately reports support for every command type, so it is normally the final fallback.
 
-The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state, hooked/virtual properties, variadic/by-reference constructor parameters, excessive array nesting, and reconstructed commands whose constructor changes the serialized state. These checks keep the default transport path deterministic and fail closed; richer command formats belong in a specialized serializer ordered before it.
+### Default JSON wire contract
+
+The default serializer uses one current versioned wire envelope:
+
+```json
+{
+  "__componenta_cqrs": 1,
+  "data": {
+    "id": 42
+  }
+}
+```
+
+Unversioned payloads are rejected. The serializer does not keep a legacy compatibility path.
+
+The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state, hooked/virtual properties, variadic/by-reference constructor parameters, excessive array nesting, unknown fields, and reconstructed commands whose constructor changes serialized state.
+
+Incoming field shape, type, and nesting are validated before command construction. Invalid or excessively deep payloads therefore cannot execute a command constructor before being rejected. Richer command formats belong in a specialized serializer ordered before the JSON fallback.
 
 ## Worker deserialization boundary
 
@@ -67,7 +86,7 @@ $worker = CommandWorker::unsafe($commandBus, $serializer, $transport);
 
 Do not use the unsafe factory for queues writable by a less-trusted actor. The class allowlist restricts which command types can be hydrated; it does not authenticate individual payload fields. Any transported business data or actor reference is a reference supplied by the producer, not an authentication credential. If untrusted parties can modify queued messages, integrity protection must cover the complete envelope/payload rather than one selected field.
 
-The worker sets `ExecutionMode::SYNC` before dispatch and exposes the producer ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`. It does not skip policy automatically. Put policy before transport to authorize before enqueue, or provide a trusted worker policy context.
+The worker sets `ExecutionMode::SYNC` before dispatch and exposes the producer ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`. It does not know about policy-specific skip attributes. Put policy before transport to authorize before enqueue, or provide a trusted worker policy context deliberately.
 
 Transport outside `SequentialMiddleware` can publish a nested async command before the parent transaction commits. Use an outbox for durable cross-system delivery.
 
