@@ -40,6 +40,7 @@
     },
     "prefer-stable": true,
     "scripts": {
-        "test": "@php vendor/bin/pest"
+        "test": "@php vendor/bin/pest",
+        "analyse": "@php vendor/bin/phpstan analyse src --level=max"
     }
 }
