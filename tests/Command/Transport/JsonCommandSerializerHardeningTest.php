@@ -21,6 +21,16 @@ final readonly class JsonNestedArrayCommand
     public function __construct(public array $data) {}
 }
 
+final class JsonHydrationProbeCommand
+{
+    public static int $constructions = 0;
+
+    public function __construct(public array $data)
+    {
+        ++self::$constructions;
+    }
+}
+
 it('advertises broad command support for composite fallback use', function (): void {
     $serializer = new JsonCommandSerializer();
 
@@ -57,4 +67,24 @@ it('rejects excessively deep arrays deterministically', function (): void {
 
     expect(fn() => $serializer->serialize(new JsonNestedArrayCommand($nested)))
         ->toThrow(TransportException::class, 'maximum JSON nesting depth');
+});
+
+it('rejects excessive payload nesting before command construction', function (): void {
+    $nested = 'leaf';
+
+    for ($i = 0; $i < 70; ++$i) {
+        $nested = [$nested];
+    }
+
+    JsonHydrationProbeCommand::$constructions = 0;
+    $payload = json_encode([
+        '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
+        'data' => ['data' => $nested],
+    ], JSON_THROW_ON_ERROR);
+
+    expect(fn() => (new JsonCommandSerializer())->deserialize(
+        $payload,
+        JsonHydrationProbeCommand::class,
+    ))->toThrow(TransportException::class, 'maximum JSON nesting depth')
+        ->and(JsonHydrationProbeCommand::$constructions)->toBe(0);
 });
