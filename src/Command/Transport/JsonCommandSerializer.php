@@ -72,11 +72,16 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $parameters = $this->constructorParameters($reflection);
         $properties = $this->assertSupportedProperties($reflection, $parameters);
 
-        if ($parameters === []) {
-            if ($data !== []) {
-                throw new TransportException("Command '{$commandClass}' has no constructor parameters, but its payload contains fields.");
-            }
+        $unknownFields = array_values(array_diff(array_keys($data), array_keys($parameters)));
+        if ($unknownFields !== []) {
+            throw new TransportException(sprintf(
+                'Payload for %s contains unknown field(s): %s.',
+                $commandClass,
+                implode(', ', $unknownFields),
+            ));
+        }
 
+        if ($parameters === []) {
             return $this->instantiate($reflection, []);
         }
 
@@ -84,15 +89,14 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $arguments = [];
         /** @var array<string, mixed> $expectedState */
         $expectedState = [];
-        $remaining = $data;
 
         foreach ($parameters as $name => $parameter) {
             if (array_key_exists($name, $data)) {
                 $value = $data[$name];
+                $this->assertJsonValue($value, $name);
                 $this->assertParameterType($value, $parameter, $commandClass);
                 $arguments[] = $value;
                 $expectedState[$name] = $value;
-                unset($remaining[$name]);
                 continue;
             }
 
@@ -105,14 +109,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             }
 
             throw new TransportException("Missing required parameter '{$name}' for {$commandClass}.");
-        }
-
-        if ($remaining !== []) {
-            throw new TransportException(sprintf(
-                'Payload for %s contains unknown field(s): %s.',
-                $commandClass,
-                implode(', ', array_keys($remaining)),
-            ));
         }
 
         $command = $this->instantiate($reflection, $arguments);
@@ -390,15 +386,14 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $decoded = $this->jsonObject($decoded, 'Invalid payload: expected a JSON object.');
 
         if (!array_key_exists(self::FORMAT_KEY, $decoded)) {
-            return $decoded;
+            throw new TransportException('Command payload must use the versioned envelope.');
         }
 
-        if (($decoded[self::FORMAT_KEY] ?? null) !== self::FORMAT_VERSION) {
+        $version = $decoded[self::FORMAT_KEY];
+        if ($version !== self::FORMAT_VERSION) {
             throw new TransportException(sprintf(
                 'Unsupported command payload version "%s".',
-                is_scalar($decoded[self::FORMAT_KEY] ?? null)
-                    ? (string) $decoded[self::FORMAT_KEY]
-                    : get_debug_type($decoded[self::FORMAT_KEY] ?? null),
+                is_scalar($version) ? (string) $version : get_debug_type($version),
             ));
         }
 
