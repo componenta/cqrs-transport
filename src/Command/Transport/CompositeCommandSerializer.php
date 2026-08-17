@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\Command\Transport;
 
-use InvalidArgumentException;
-
 /**
  * Delegates command serialization to the first serializer that supports the
  * command type.
@@ -23,24 +21,7 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
      */
     public function __construct(iterable $serializers)
     {
-        $validated = [];
-
-        foreach ($serializers as $serializer) {
-            if (!$serializer instanceof CommandSerializerInterface
-                || !$serializer instanceof CommandSerializerSupportInterface
-            ) {
-                throw new InvalidArgumentException(sprintf(
-                    'Composite serializer entries must implement both %s and %s; %s given.',
-                    CommandSerializerInterface::class,
-                    CommandSerializerSupportInterface::class,
-                    get_debug_type($serializer),
-                ));
-            }
-
-            $validated[] = $serializer;
-        }
-
-        $this->serializers = $validated;
+        $this->serializers = [...$serializers];
     }
 
     public function supportsCommand(object|string $command): bool
