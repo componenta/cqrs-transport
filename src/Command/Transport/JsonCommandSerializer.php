@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\Command\Transport;
 
+use Closure;
 use JsonException;
 use ReflectionClass;
 use ReflectionIntersectionType;
@@ -150,10 +151,52 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                 ));
             }
 
+            $this->assertSupportedParameterType($parameter, $reflection);
             $parameters[$parameter->getName()] = $parameter;
         }
 
         return $parameters;
+    }
+
+    /** @param ReflectionClass<object> $reflection */
+    private function assertSupportedParameterType(
+        ReflectionParameter $parameter,
+        ReflectionClass $reflection,
+    ): void {
+        $type = $parameter->getType();
+
+        if ($type === null || !self::containsExecutableType($type)) {
+            return;
+        }
+
+        throw new TransportException(sprintf(
+            'Default JSON serialization does not support executable callable constructor parameter "%s" on %s; configure a trusted custom serializer.',
+            $parameter->getName(),
+            $reflection->getName(),
+        ));
+    }
+
+    private static function containsExecutableType(ReflectionType $type): bool
+    {
+        if ($type instanceof ReflectionUnionType || $type instanceof ReflectionIntersectionType) {
+            foreach ($type->getTypes() as $member) {
+                if (self::containsExecutableType($member)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (!$type instanceof ReflectionNamedType) {
+            return false;
+        }
+
+        if ($type->isBuiltin()) {
+            return $type->getName() === 'callable';
+        }
+
+        return is_a($type->getName(), Closure::class, true);
     }
 
     /**
@@ -342,7 +385,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             'array' => is_array($value),
             'iterable' => is_iterable($value),
             'object' => is_object($value),
-            'callable' => is_callable($value),
+            'callable' => false,
             default => is_object($value) && is_a($value, $type->getName()),
         };
     }
