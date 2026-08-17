@@ -22,7 +22,7 @@ function workerTestKnownCommands(bool $known = true): CommandMetadataProviderInt
     };
 }
 
-it('requires an explicit command allowlist by default', function (): void {
+it('uses unsafe() as the explicit no-allowlist construction path', function (): void {
     $bus = new class implements CommandBusInterface {
         public function dispatch(object $command, array $attributes = []): OperationInterface { return Operation::create($command, $attributes); }
     };
@@ -36,7 +36,8 @@ it('requires an explicit command allowlist by default', function (): void {
         public function ack(Envelope $envelope): void {}
         public function reject(Envelope $envelope): void {}
     };
-    expect(fn () => new CommandWorker($bus, $serializer, $transport))->toThrow(InvalidArgumentException::class, 'requires a complete');
+
+    expect(CommandWorker::unsafe($bus, $serializer, $transport)->processOne())->toBeFalse();
 });
 
 it('re-dispatches transported commands with worker attributes', function (): void {
@@ -60,7 +61,7 @@ it('re-dispatches transported commands with worker attributes', function (): voi
         public function ack(Envelope $envelope): void { ++$this->acks; }
         public function reject(Envelope $envelope): void { ++$this->rejects; }
     };
-    $worker = new CommandWorker($bus, $serializer, $transport, commands: workerTestKnownCommands());
+    $worker = new CommandWorker($bus, $serializer, $transport, workerTestKnownCommands());
     expect($worker->processOne())->toBeTrue()
         ->and($bus->command)->toBe($command)
         ->and($bus->attributes)->toMatchArray([CommandWorker::ATTR_ORIGINAL_OPERATION_ID => 'operation-id', TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::SYNC])
@@ -84,7 +85,20 @@ it('keeps sync execution mode authoritative over custom dispatch attributes', fu
         public function ack(Envelope $envelope): void {}
         public function reject(Envelope $envelope): void {}
     };
-    $worker = new CommandWorker($bus, $serializer, $transport, dispatchAttributes: ['tenant' => 'main', TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::ASYNC], commands: workerTestKnownCommands());
+    $worker = new CommandWorker(
+        $bus,
+        $serializer,
+        $transport,
+        workerTestKnownCommands(),
+        dispatchAttributes: [
+            'tenant' => 'main',
+            TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::ASYNC,
+        ],
+    );
     $worker->processOne();
-    expect($bus->attributes)->toBe(['tenant' => 'main', TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::SYNC, CommandWorker::ATTR_ORIGINAL_OPERATION_ID => 'operation-id']);
+    expect($bus->attributes)->toBe([
+        'tenant' => 'main',
+        TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::SYNC,
+        CommandWorker::ATTR_ORIGINAL_OPERATION_ID => 'operation-id',
+    ]);
 });
