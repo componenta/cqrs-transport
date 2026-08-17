@@ -40,7 +40,9 @@ $serializer = new CompositeCommandSerializer([
 ]);
 ```
 
-Selection is symmetric: serialization checks the command object and deserialization checks the command class before an instance exists. `JsonCommandSerializer` implements the support interface and deliberately reports support for every command type, so it is normally the final fallback.
+Selection must be stable for a command class. Serialization can pass an object, while deserialization has only the class name; therefore `supportsCommand($instance)` and `supportsCommand($instance::class)` must return the same result. A support predicate must not depend on actor value or other per-instance state.
+
+`JsonCommandSerializer` implements the support interface and deliberately reports support for every command type, so it is normally the final fallback.
 
 The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state, hooked/virtual properties, variadic/by-reference constructor parameters, excessive array nesting, and reconstructed commands whose constructor changes the serialized state. These checks keep the default transport path deterministic and fail closed; richer command formats belong in a specialized serializer ordered before it.
 
