@@ -80,7 +80,9 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             return $this->instantiate($reflection, []);
         }
 
+        /** @var list<mixed> $arguments */
         $arguments = [];
+        /** @var array<string, mixed> $expectedState */
         $expectedState = [];
         $remaining = $data;
 
@@ -119,7 +121,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         return $command;
     }
 
-    /** @param ReflectionClass<object> $reflection @return array<string, mixed> */
+    /**
+     * @param ReflectionClass<object> $reflection
+     * @return array<string, mixed>
+     */
     private function extractConstructorData(ReflectionClass $reflection, object $command): array
     {
         $parameters = $this->constructorParameters($reflection);
@@ -147,7 +152,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         return $data;
     }
 
-    /** @param ReflectionClass<object> $reflection @return array<string, ReflectionParameter> */
+    /**
+     * @param ReflectionClass<object> $reflection
+     * @return array<string, ReflectionParameter>
+     */
     private function constructorParameters(ReflectionClass $reflection): array
     {
         $constructor = $reflection->getConstructor();
@@ -452,6 +460,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -461,6 +470,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                     return false;
                 }
             }
+
             return true;
         }
 
@@ -483,7 +493,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         };
     }
 
-    /** @param ReflectionClass<object> $reflection @param list<mixed> $arguments */
+    /**
+     * @param ReflectionClass<object> $reflection
+     * @param list<mixed> $arguments
+     */
     private function instantiate(ReflectionClass $reflection, array $arguments): object
     {
         try {
