@@ -114,6 +114,34 @@ it('uses class-based support selection before deserialization', function (): voi
         ]);
 });
 
+it('rejects instance-dependent support before serialization can choose a different owner than deserialization', function (bool $instanceSupport): void {
+    $unstable = new class($instanceSupport) implements CommandSerializerInterface, CommandSerializerSupportInterface {
+        public function __construct(private readonly bool $instanceSupport) {}
+
+        public function supportsCommand(object|string $command): bool
+        {
+            return is_object($command) ? $this->instanceSupport : !$this->instanceSupport;
+        }
+
+        public function serialize(object $command): string
+        {
+            return 'unstable';
+        }
+
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new CompositeSpecialCommand(1);
+        }
+    };
+    $composite = new CompositeCommandSerializer([$unstable, new JsonCommandSerializer()]);
+
+    expect(fn() => $composite->serialize(new CompositeSpecialCommand(1)))
+        ->toThrow(TransportException::class, 'instance-dependent support');
+})->with([
+    'instance true, class false' => [true],
+    'instance false, class true' => [false],
+]);
+
 it('does not fall through after a supporting serializer fails', function (): void {
     $failing = new class implements CommandSerializerInterface, CommandSerializerSupportInterface {
         public function supportsCommand(object|string $command): bool
