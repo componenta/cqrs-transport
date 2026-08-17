@@ -16,12 +16,18 @@ use ReflectionUnionType;
 use Throwable;
 
 /** JSON serializer for public stored constructor-backed command state. */
-final readonly class JsonCommandSerializer implements CommandSerializerInterface
+final readonly class JsonCommandSerializer implements CommandSerializerInterface, CommandSerializerSupportInterface
 {
     public const int FORMAT_VERSION = 1;
 
+    private const int MAX_NESTING_DEPTH = 64;
     private const string FORMAT_KEY = '__componenta_cqrs';
     private const string DATA_KEY = 'data';
+
+    public function supportsCommand(object|string $command): bool
+    {
+        return true;
+    }
 
     public function serialize(object $command): string
     {
@@ -64,7 +70,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         $parameters = $this->constructorParameters($reflection);
-        $this->assertSupportedProperties($reflection, $parameters);
+        $properties = $this->assertSupportedProperties($reflection, $parameters);
 
         if ($parameters === []) {
             if ($data !== []) {
@@ -75,6 +81,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         $arguments = [];
+        $expectedState = [];
         $remaining = $data;
 
         foreach ($parameters as $name => $parameter) {
@@ -82,12 +89,16 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                 $value = $data[$name];
                 $this->assertParameterType($value, $parameter, $commandClass);
                 $arguments[] = $value;
+                $expectedState[$name] = $value;
                 unset($remaining[$name]);
                 continue;
             }
 
             if ($parameter->isDefaultValueAvailable()) {
-                $arguments[] = $parameter->getDefaultValue();
+                $value = $parameter->getDefaultValue();
+                $this->assertJsonValue($value, $name);
+                $arguments[] = $value;
+                $expectedState[$name] = $value;
                 continue;
             }
 
@@ -102,7 +113,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             ));
         }
 
-        return $this->instantiate($reflection, $arguments);
+        $command = $this->instantiate($reflection, $arguments);
+        $this->assertRoundTripState($command, $expectedState, $properties, $commandClass);
+
+        return $command;
     }
 
     /** @param ReflectionClass<object> $reflection @return array<string, mixed> */
@@ -254,8 +268,16 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         return $properties;
     }
 
-    private function assertJsonValue(mixed $value, string $path): void
+    private function assertJsonValue(mixed $value, string $path, int $depth = 0): void
     {
+        if ($depth > self::MAX_NESTING_DEPTH) {
+            throw new TransportException(sprintf(
+                'Command field "%s" exceeds the maximum JSON nesting depth of %d.',
+                $path,
+                self::MAX_NESTING_DEPTH,
+            ));
+        }
+
         if ($value === null || is_bool($value) || is_int($value) || is_string($value)) {
             return;
         }
@@ -270,7 +292,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
 
         if (is_array($value)) {
             foreach ($value as $key => $item) {
-                $this->assertJsonValue($item, $path . '.' . $key);
+                $this->assertJsonValue($item, $path . '.' . $key, $depth + 1);
             }
 
             return;
@@ -281,6 +303,77 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             $path,
             get_debug_type($value),
         ));
+    }
+
+    /**
+     * @param array<string, mixed> $expectedState
+     * @param array<string, ReflectionProperty> $properties
+     */
+    private function assertRoundTripState(
+        object $command,
+        array $expectedState,
+        array $properties,
+        string $commandClass,
+    ): void {
+        foreach ($expectedState as $name => $expected) {
+            $property = $properties[$name];
+
+            if (!$property->isInitialized($command)) {
+                throw new TransportException(sprintf(
+                    'Restored command %s left constructor-backed field "%s" uninitialized.',
+                    $commandClass,
+                    $name,
+                ));
+            }
+
+            try {
+                $actual = $property->getValue($command);
+            } catch (Throwable $exception) {
+                throw new TransportException(
+                    sprintf('Cannot read restored command field "%s": %s', $name, $exception->getMessage()),
+                    previous: $exception,
+                );
+            }
+
+            if (!$this->valuesEquivalent($expected, $actual)) {
+                throw new TransportException(sprintf(
+                    'Restored command %s changed constructor-backed field "%s" during reconstruction.',
+                    $commandClass,
+                    $name,
+                ));
+            }
+        }
+    }
+
+    private function valuesEquivalent(mixed $expected, mixed $actual, int $depth = 0): bool
+    {
+        if ($depth > self::MAX_NESTING_DEPTH) {
+            return false;
+        }
+
+        if (is_int($expected) && is_float($actual)) {
+            return (float) $expected === $actual;
+        }
+
+        if (is_float($expected) && is_int($actual)) {
+            return $expected === (float) $actual;
+        }
+
+        if (is_array($expected) && is_array($actual)) {
+            if (array_keys($expected) !== array_keys($actual)) {
+                return false;
+            }
+
+            foreach ($expected as $key => $value) {
+                if (!$this->valuesEquivalent($value, $actual[$key], $depth + 1)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return $expected === $actual;
     }
 
     /** @return array<string, mixed> */
