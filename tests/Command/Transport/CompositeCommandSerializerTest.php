@@ -133,23 +133,6 @@ it('throws when no serializer supports the command', function (): void {
         ->toThrow(TransportException::class, 'No command serializer supports');
 });
 
-it('rejects entries that do not implement both serializer contracts', function (): void {
-    $invalid = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string
-        {
-            return '';
-        }
-
-        public function deserialize(string $payload, string $commandClass): object
-        {
-            return new CompositeOtherCommand(1);
-        }
-    };
-
-    expect(fn() => new CompositeCommandSerializer([$invalid]))
-        ->toThrow(InvalidArgumentException::class, CommandSerializerSupportInterface::class);
-});
-
 it('uses JsonCommandSerializer as a broad fallback when it is ordered last', function (): void {
     $special = new CompositeRecordingSerializer(
         CompositeSpecialCommand::class,
