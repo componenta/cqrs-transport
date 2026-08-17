@@ -21,7 +21,14 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
      */
     public function __construct(iterable $serializers)
     {
-        $this->serializers = [...$serializers];
+        /** @var list<CommandSerializerInterface&CommandSerializerSupportInterface> $ordered */
+        $ordered = [];
+
+        foreach ($serializers as $serializer) {
+            $ordered[] = $serializer;
+        }
+
+        $this->serializers = $ordered;
     }
 
     public function supportsCommand(object|string $command): bool
