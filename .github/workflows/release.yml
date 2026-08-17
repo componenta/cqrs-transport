@@ -28,6 +28,8 @@ jobs:
       - name: Configure Composer authentication
         run: composer config --global github-oauth.github.com "${{ github.token }}"
       - run: composer validate --strict
+      - name: Select CQRS version
+        run: composer require --no-update "componenta/cqrs:${{ matrix.cqrs }}"
       - name: Install dependency matrix
         shell: bash
         env:
@@ -35,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if composer update "componenta/cqrs:${{ matrix.cqrs }}" --with-all-dependencies --no-interaction --prefer-dist --no-progress; then
+            if composer update --with-all-dependencies --no-interaction --prefer-dist --no-progress; then
               exit 0
             fi
 
