@@ -46,6 +46,29 @@ final readonly class JsonLiteralTypeCommand
 {
     public function __construct(public true $enabled, public false $disabled) {}
 }
+final class JsonCallableParameterCommand
+{
+    public mixed $callback;
+    public function __construct(callable $callback) { $this->callback = $callback; }
+}
+final class JsonCallableUnionCommand
+{
+    public mixed $callback;
+    public function __construct(callable|string $callback) { $this->callback = $callback; }
+}
+final class JsonClosureParameterCommand
+{
+    public mixed $callback;
+    public function __construct(?Closure $callback) { $this->callback = $callback; }
+}
+final readonly class JsonStringCapabilityNameCommand
+{
+    public function __construct(public string $callback) {}
+}
+final class JsonCallableTarget
+{
+    public static function run(): void {}
+}
 
 it('round-trips supported constructor-backed JSON values with a versioned envelope', function (): void {
     $serializer = new JsonCommandSerializer();
@@ -96,6 +119,54 @@ it('rejects scalar coercion, invalid union members, and non-nullable null', func
     ['{"id":12,"ratio":true,"label":null}', 'must match float; bool given'],
     ['{"id":null,"ratio":3,"label":null}', 'must match int; null given'],
 ]);
+
+it('rejects executable capability types before inspecting transported values', function (Closure $operation): void {
+    expect($operation)->toThrow(
+        TransportException::class,
+        'does not support executable callable constructor parameter',
+    );
+})->with([
+    'serialize callable' => [
+        fn () => (new JsonCommandSerializer())->serialize(
+            new JsonCallableParameterCommand('strlen'),
+        ),
+    ],
+    'callable string' => [
+        fn () => (new JsonCommandSerializer())->deserialize(
+            '{"callback":"system"}',
+            JsonCallableParameterCommand::class,
+        ),
+    ],
+    'callable array' => [
+        fn () => (new JsonCommandSerializer())->deserialize(
+            json_encode([
+                'callback' => [JsonCallableTarget::class, 'run'],
+            ], JSON_THROW_ON_ERROR),
+            JsonCallableParameterCommand::class,
+        ),
+    ],
+    'union containing callable' => [
+        fn () => (new JsonCommandSerializer())->deserialize(
+            '{"callback":"safe"}',
+            JsonCallableUnionCommand::class,
+        ),
+    ],
+    'nullable Closure' => [
+        fn () => (new JsonCommandSerializer())->deserialize(
+            '{"callback":null}',
+            JsonClosureParameterCommand::class,
+        ),
+    ],
+]);
+
+it('keeps executable-looking text as ordinary data for string fields', function (): void {
+    $command = (new JsonCommandSerializer())->deserialize(
+        '{"callback":"system"}',
+        JsonStringCapabilityNameCommand::class,
+    );
+
+    expect($command)->toEqual(new JsonStringCapabilityNameCommand('system'));
+});
 
 it('fails fast for unsupported command shapes and unknown payload fields', function (Closure $operation, string $message): void {
     expect($operation)->toThrow(TransportException::class, $message);
