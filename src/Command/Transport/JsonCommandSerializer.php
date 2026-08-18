@@ -82,7 +82,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         if ($parameters === []) {
-            return $this->instantiate($reflection, []);
+            $command = $this->instantiate($reflection, []);
+            $this->assertNoDynamicProperties($command, $properties, $commandClass);
+
+            return $command;
         }
 
         /** @var list<mixed> $arguments */
@@ -112,6 +115,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         $command = $this->instantiate($reflection, $arguments);
+        $this->assertNoDynamicProperties($command, $properties, $commandClass);
         $this->assertRoundTripState($command, $expectedState, $properties, $commandClass);
 
         return $command;
@@ -125,6 +129,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
     {
         $parameters = $this->constructorParameters($reflection);
         $properties = $this->assertSupportedProperties($reflection, $parameters);
+        $this->assertNoDynamicProperties($command, $properties, $reflection->getName());
         $data = [];
 
         foreach ($properties as $name => $property) {
@@ -270,6 +275,28 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         return $properties;
+    }
+
+    /** @param array<string, ReflectionProperty> $properties */
+    private function assertNoDynamicProperties(
+        object $command,
+        array $properties,
+        string $commandClass,
+    ): void {
+        $dynamic = array_values(array_diff(
+            array_keys(get_object_vars($command)),
+            array_keys($properties),
+        ));
+
+        if ($dynamic === []) {
+            return;
+        }
+
+        throw new TransportException(sprintf(
+            'Command %s contains unsupported dynamic property(s): %s.',
+            $commandClass,
+            implode(', ', $dynamic),
+        ));
     }
 
     private function assertJsonValue(mixed $value, string $path, int $depth = 0): void
