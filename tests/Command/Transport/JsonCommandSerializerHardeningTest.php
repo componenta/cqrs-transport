@@ -46,6 +46,16 @@ final class JsonDynamicHydrationCommand
     }
 }
 
+class JsonInheritedPrivateStateBase
+{
+    private string $secret = 'hidden';
+}
+
+final class JsonInheritedPrivateStateCommand extends JsonInheritedPrivateStateBase
+{
+    public function __construct(public int $id) {}
+}
+
 it('advertises broad command support for composite fallback use', function (): void {
     $serializer = new JsonCommandSerializer();
 
@@ -80,6 +90,20 @@ it('rejects dynamic state created during command reconstruction', function (): v
         $payload,
         JsonDynamicHydrationCommand::class,
     ))->toThrow(TransportException::class, 'unsupported dynamic property(s): runtimeState');
+});
+
+it('rejects inherited private command state on serialization and reconstruction', function (): void {
+    $serializer = new JsonCommandSerializer();
+
+    expect(fn() => $serializer->serialize(new JsonInheritedPrivateStateCommand(1)))
+        ->toThrow(TransportException::class, 'inherited private property')
+        ->and(fn() => $serializer->deserialize(
+            json_encode([
+                '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
+                'data' => ['id' => 1],
+            ], JSON_THROW_ON_ERROR),
+            JsonInheritedPrivateStateCommand::class,
+        ))->toThrow(TransportException::class, 'inherited private property');
 });
 
 it('rejects recursive arrays before unbounded recursion can exhaust the process', function (): void {
