@@ -48,7 +48,7 @@ If one command class can carry several domain actor/value variants, a custom ser
 
 ### Default JSON wire contract
 
-The default serializer uses one current versioned wire envelope:
+The default serializer accepts only the current versioned wire envelope:
 
 ```json
 {
@@ -59,9 +59,9 @@ The default serializer uses one current versioned wire envelope:
 }
 ```
 
-Unversioned payloads are rejected. The serializer does not keep a legacy compatibility path.
+Unversioned payloads are rejected.
 
-The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, excessive array nesting, unknown fields, and reconstructed commands whose constructor changes serialized state.
+The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state including inherited private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, excessive array nesting, unknown fields, and reconstructed commands whose constructor changes serialized state.
 
 Dynamic runtime state is rejected both before serialization and after reconstruction. A command therefore cannot silently lose `#[AllowDynamicProperties]` state that is outside the declared constructor-backed wire contract.
 
