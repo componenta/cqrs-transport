@@ -229,6 +229,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
      */
     private function assertSupportedProperties(ReflectionClass $reflection, array $parameters): array
     {
+        $this->assertNoInheritedPrivateProperties($reflection);
         $properties = [];
 
         foreach ($reflection->getProperties() as $property) {
@@ -275,6 +276,31 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         return $properties;
+    }
+
+    /** @param ReflectionClass<object> $reflection */
+    private function assertNoInheritedPrivateProperties(ReflectionClass $reflection): void
+    {
+        $ancestor = $reflection->getParentClass();
+
+        while ($ancestor !== false) {
+            foreach ($ancestor->getProperties(ReflectionProperty::IS_PRIVATE) as $property) {
+                if ($property->isStatic()
+                    || $property->getDeclaringClass()->getName() !== $ancestor->getName()
+                ) {
+                    continue;
+                }
+
+                throw new TransportException(sprintf(
+                    'Default JSON serialization does not support inherited private property "%s::$%s" on %s; configure a custom serializer.',
+                    $ancestor->getName(),
+                    $property->getName(),
+                    $reflection->getName(),
+                ));
+            }
+
+            $ancestor = $ancestor->getParentClass();
+        }
     }
 
     /** @param array<string, ReflectionProperty> $properties */
