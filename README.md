@@ -40,7 +40,7 @@ $serializer = new CompositeCommandSerializer([
 ]);
 ```
 
-Selection must be stable for a command class. Serialization can pass an object, while deserialization has only the class name; therefore `supportsCommand($instance)` and `supportsCommand($instance::class)` must return the same result. A support predicate must not depend on actor value or other per-instance state.
+Selection must be stable for a command class. Serialization can pass an object, while deserialization has only the class name; therefore `supportsCommand($instance)` and `supportsCommand($instance::class)` must return the same result. The composite verifies that invariant while serializing and rejects instance-dependent ownership. A support predicate must be deterministic and side-effect free.
 
 If one command class can carry several domain actor/value variants, a custom serializer cannot claim only selected instances of that class. It must own the whole command class and handle its supported wire variants itself, or the command types must be separated.
 
@@ -61,7 +61,9 @@ The default serializer uses one current versioned wire envelope:
 
 Unversioned payloads are rejected. The serializer does not keep a legacy compatibility path.
 
-The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state, hooked/virtual properties, variadic/by-reference constructor parameters, excessive array nesting, unknown fields, and reconstructed commands whose constructor changes serialized state.
+The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. It rejects executable callable/Closure capability types, arbitrary objects, private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, excessive array nesting, unknown fields, and reconstructed commands whose constructor changes serialized state.
+
+Dynamic runtime state is rejected both before serialization and after reconstruction. A command therefore cannot silently lose `#[AllowDynamicProperties]` state that is outside the declared constructor-backed wire contract.
 
 Incoming field shape, type, and nesting are validated before command construction. Invalid or excessively deep payloads therefore cannot execute a command constructor before being rejected. Richer command formats belong in a specialized serializer ordered before the JSON fallback.
 
