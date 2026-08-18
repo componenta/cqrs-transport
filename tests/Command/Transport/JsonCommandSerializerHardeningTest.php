@@ -31,6 +31,21 @@ final class JsonHydrationProbeCommand
     }
 }
 
+#[AllowDynamicProperties]
+final class JsonDynamicStateCommand
+{
+    public function __construct(public int $id) {}
+}
+
+#[AllowDynamicProperties]
+final class JsonDynamicHydrationCommand
+{
+    public function __construct(public int $id)
+    {
+        $this->runtimeState = 'created';
+    }
+}
+
 it('advertises broad command support for composite fallback use', function (): void {
     $serializer = new JsonCommandSerializer();
 
@@ -45,6 +60,26 @@ it('rejects reconstruction that changes constructor-backed state', function (): 
 
     expect(fn() => $serializer->deserialize($payload, JsonNonIdempotentCommand::class))
         ->toThrow(TransportException::class, 'changed constructor-backed field "id"');
+});
+
+it('rejects dynamic command state instead of silently dropping it', function (): void {
+    $command = new JsonDynamicStateCommand(1);
+    $command->runtimeState = 'producer-only';
+
+    expect(fn() => (new JsonCommandSerializer())->serialize($command))
+        ->toThrow(TransportException::class, 'unsupported dynamic property(s): runtimeState');
+});
+
+it('rejects dynamic state created during command reconstruction', function (): void {
+    $payload = json_encode([
+        '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
+        'data' => ['id' => 1],
+    ], JSON_THROW_ON_ERROR);
+
+    expect(fn() => (new JsonCommandSerializer())->deserialize(
+        $payload,
+        JsonDynamicHydrationCommand::class,
+    ))->toThrow(TransportException::class, 'unsupported dynamic property(s): runtimeState');
 });
 
 it('rejects recursive arrays before unbounded recursion can exhaust the process', function (): void {
