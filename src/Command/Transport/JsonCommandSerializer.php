@@ -34,17 +34,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $reflection = new ReflectionClass($command);
         $data = $this->extractConstructorData($reflection, $command);
 
-        try {
-            return json_encode([
-                self::FORMAT_KEY => self::FORMAT_VERSION,
-                self::DATA_KEY => $data,
-            ], JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
-        } catch (JsonException $exception) {
-            throw new TransportException(
-                "Failed to serialize command: {$exception->getMessage()}",
-                previous: $exception,
-            );
-        }
+        return $this->encodeData($data);
     }
 
     public function deserialize(string $payload, string $commandClass): object
@@ -119,6 +109,33 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $this->assertRoundTripState($command, $expectedState, $properties, $commandClass);
 
         return $command;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function encodeData(array $data): string
+    {
+        try {
+            $payload = json_encode([
+                self::FORMAT_KEY => self::FORMAT_VERSION,
+                self::DATA_KEY => $data,
+            ], JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
+            $encodedData = $this->payloadData(
+                json_decode($payload, true, 512, JSON_THROW_ON_ERROR),
+            );
+        } catch (JsonException $exception) {
+            throw new TransportException(
+                "Failed to serialize command: {$exception->getMessage()}",
+                previous: $exception,
+            );
+        }
+
+        if (!$this->valuesEquivalent($data, $encodedData)) {
+            throw new TransportException(
+                'JSON encoding changed command state; configure PHP for lossless JSON float serialization or use a custom serializer.',
+            );
+        }
+
+        return $payload;
     }
 
     /**
