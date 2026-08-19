@@ -102,6 +102,21 @@ it('preserves float wire types exactly including nested values', function (): vo
         ->toBe(bin2hex(pack('E', -0.0)));
 });
 
+it('fails closed when PHP JSON precision would change a float', function (): void {
+    $previous = ini_get('serialize_precision');
+    ini_set('serialize_precision', '2');
+
+    try {
+        expect(fn() => (new JsonCommandSerializer())->serialize(
+            new JsonMixedNumericCommand(1.23456789012345),
+        ))->toThrow(TransportException::class, 'JSON encoding changed command state');
+    } finally {
+        if (is_string($previous)) {
+            ini_set('serialize_precision', $previous);
+        }
+    }
+});
+
 it('rejects a JSON integer for a float constructor field', function (): void {
     $payload = json_encode([
         '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
