@@ -440,7 +440,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             throw new TransportException('Command payload must use the versioned envelope.');
         }
 
-        $version = $decoded[self::FORMAT_VERSION] ?? null;
         $version = $decoded[self::FORMAT_KEY];
         if ($version !== self::FORMAT_VERSION) {
             throw new TransportException(sprintf(
