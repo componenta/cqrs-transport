@@ -21,6 +21,26 @@ final readonly class JsonNestedArrayCommand
     public function __construct(public array $data) {}
 }
 
+final readonly class JsonFloatCommand
+{
+    public function __construct(public float $value) {}
+}
+
+final readonly class JsonMixedNumericCommand
+{
+    public function __construct(public mixed $value) {}
+}
+
+final class JsonNumericMutatingCommand
+{
+    public mixed $value;
+
+    public function __construct(mixed $value)
+    {
+        $this->value = (float) $value;
+    }
+}
+
 final class JsonHydrationProbeCommand
 {
     public static int $constructions = 0;
@@ -62,6 +82,46 @@ it('advertises broad command support for composite fallback use', function (): v
     expect($serializer)->toBeInstanceOf(CommandSerializerSupportInterface::class)
         ->and($serializer->supportsCommand(new JsonNestedArrayCommand([])))->toBeTrue()
         ->and($serializer->supportsCommand(JsonNestedArrayCommand::class))->toBeTrue();
+});
+
+it('preserves float wire types exactly including nested values', function (): void {
+    $serializer = new JsonCommandSerializer();
+    $payload = $serializer->serialize(new JsonMixedNumericCommand([
+        'top' => 1.0,
+        'negative_zero' => -0.0,
+    ]));
+    $decoded = json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
+    $restored = $serializer->deserialize($payload, JsonMixedNumericCommand::class);
+
+    expect($decoded['data']['value']['top'])->toBeFloat()->toBe(1.0)
+        ->and($decoded['data']['value']['negative_zero'])->toBeFloat()
+        ->and(bin2hex(pack('E', $decoded['data']['value']['negative_zero'])))
+        ->toBe(bin2hex(pack('E', -0.0)))
+        ->and($restored->value['top'])->toBeFloat()->toBe(1.0)
+        ->and(bin2hex(pack('E', $restored->value['negative_zero'])))
+        ->toBe(bin2hex(pack('E', -0.0)));
+});
+
+it('rejects a JSON integer for a float constructor field', function (): void {
+    $payload = json_encode([
+        '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
+        'data' => ['value' => 1],
+    ], JSON_THROW_ON_ERROR);
+
+    expect(fn() => (new JsonCommandSerializer())->deserialize($payload, JsonFloatCommand::class))
+        ->toThrow(TransportException::class, 'must match float; int given');
+});
+
+it('rejects numeric type mutation for mixed constructor-backed state', function (): void {
+    $payload = json_encode([
+        '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
+        'data' => ['value' => 1],
+    ], JSON_THROW_ON_ERROR);
+
+    expect(fn() => (new JsonCommandSerializer())->deserialize(
+        $payload,
+        JsonNumericMutatingCommand::class,
+    ))->toThrow(TransportException::class, 'changed constructor-backed field "value"');
 });
 
 it('rejects reconstruction that changes constructor-backed state', function (): void {
