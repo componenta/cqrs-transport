@@ -38,7 +38,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             return json_encode([
                 self::FORMAT_KEY => self::FORMAT_VERSION,
                 self::DATA_KEY => $data,
-            ], JSON_THROW_ON_ERROR);
+            ], JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
         } catch (JsonException $exception) {
             throw new TransportException(
                 "Failed to serialize command: {$exception->getMessage()}",
@@ -408,12 +408,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             return false;
         }
 
-        if (is_int($expected) && is_float($actual)) {
-            return (float) $expected === $actual;
-        }
-
-        if (is_float($expected) && is_int($actual)) {
-            return $expected === (float) $actual;
+        if (is_float($expected) || is_float($actual)) {
+            return is_float($expected)
+                && is_float($actual)
+                && pack('E', $expected) === pack('E', $actual);
         }
 
         if (is_array($expected) && is_array($actual)) {
@@ -442,6 +440,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             throw new TransportException('Command payload must use the versioned envelope.');
         }
 
+        $version = $decoded[self::FORMAT_VERSION] ?? null;
         $version = $decoded[self::FORMAT_KEY];
         if ($version !== self::FORMAT_VERSION) {
             throw new TransportException(sprintf(
@@ -531,7 +530,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             'true' => $value === true,
             'false' => $value === false,
             'int' => is_int($value),
-            'float' => is_float($value) || is_int($value),
+            'float' => is_float($value),
             'string' => is_string($value),
             'array' => is_array($value),
             'iterable' => is_iterable($value),
