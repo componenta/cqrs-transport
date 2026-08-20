@@ -127,10 +127,22 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
                 self::MAX_DEPTH,
                 JSON_THROW_ON_ERROR,
             );
+            $bigIntegerAware = json_decode(
+                $payload,
+                true,
+                self::MAX_DEPTH,
+                JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING,
+            );
         } catch (JsonException $exception) {
             throw new OperationContextSerializationException(
                 'Failed to deserialize operation transport context: ' . $exception->getMessage(),
                 previous: $exception,
+            );
+        }
+
+        if (self::containsOutOfRangeJsonInteger($context, $bigIntegerAware)) {
+            throw new OperationContextSerializationException(
+                'Operation transport context contains an integer outside the PHP integer range.',
             );
         }
 
@@ -156,6 +168,40 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
 
         /** @var array<string, mixed> $context */
         return $context;
+    }
+
+    private static function containsOutOfRangeJsonInteger(mixed $decoded, mixed $bigIntegerAware): bool
+    {
+        $stack = [[$decoded, $bigIntegerAware]];
+
+        while ($stack !== []) {
+            [$value, $aware] = array_pop($stack);
+
+            if (is_float($value)
+                && is_string($aware)
+                && preg_match('/^-?[0-9]+$/D', $aware) === 1
+            ) {
+                return true;
+            }
+
+            if (is_array($value) !== is_array($aware)) {
+                return true;
+            }
+
+            if (!is_array($value)) {
+                continue;
+            }
+
+            if (array_keys($value) !== array_keys($aware)) {
+                return true;
+            }
+
+            foreach ($value as $key => $nested) {
+                $stack[] = [$nested, $aware[$key]];
+            }
+        }
+
+        return false;
     }
 
     private static function assertJsonValue(mixed $value, string $path, int $depth = 0): void
