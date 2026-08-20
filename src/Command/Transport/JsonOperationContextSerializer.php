@@ -73,10 +73,16 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
         }
 
         try {
-            return json_encode(
+            $payload = json_encode(
                 (object) $context,
                 JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION,
                 self::MAX_DEPTH,
+            );
+            $decoded = json_decode(
+                $payload,
+                true,
+                self::MAX_DEPTH,
+                JSON_THROW_ON_ERROR,
             );
         } catch (JsonException $exception) {
             throw new OperationContextSerializationException(
@@ -84,6 +90,17 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
                 previous: $exception,
             );
         }
+
+        if (!is_array($decoded)
+            || (array_is_list($decoded) && $decoded !== [])
+            || !self::valuesEquivalent($context, $decoded)
+        ) {
+            throw new OperationContextSerializationException(
+                'JSON encoding changed operation transport context; configure PHP for lossless JSON float serialization or use a custom serializer.',
+            );
+        }
+
+        return $payload;
     }
 
     public function deserialize(string $payload): array
@@ -173,5 +190,34 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
                 $depth + 1,
             );
         }
+    }
+
+    private static function valuesEquivalent(mixed $expected, mixed $actual, int $depth = 0): bool
+    {
+        if ($depth >= self::MAX_DEPTH) {
+            return false;
+        }
+
+        if (is_float($expected) || is_float($actual)) {
+            return is_float($expected)
+                && is_float($actual)
+                && pack('E', $expected) === pack('E', $actual);
+        }
+
+        if (is_array($expected) && is_array($actual)) {
+            if (array_keys($expected) !== array_keys($actual)) {
+                return false;
+            }
+
+            foreach ($expected as $key => $value) {
+                if (!self::valuesEquivalent($value, $actual[$key], $depth + 1)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return $expected === $actual;
     }
 }
