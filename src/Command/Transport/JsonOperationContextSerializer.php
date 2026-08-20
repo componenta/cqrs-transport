@@ -88,9 +88,11 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
 
     public function deserialize(string $payload): array
     {
-        if (trim($payload) === '') {
+        $payload = trim($payload);
+
+        if ($payload === '' || $payload[0] !== '{') {
             throw new OperationContextSerializationException(
-                'Operation transport context payload cannot be empty.',
+                'Operation transport context must be a JSON object.',
             );
         }
 
