@@ -124,11 +124,12 @@ function workerDispositionWorker(
     ?CqrsMapProviderInterface $commands = null,
 ): CommandWorker {
     return new CommandWorker(
-        $bus,
-        $serializer,
-        new JsonOperationContextSerializer(),
-        $transport,
-        $commands ?? workerDispositionMap(stdClass::class),
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+        commands: $commands ?? workerDispositionMap(stdClass::class),
     );
 }
 
