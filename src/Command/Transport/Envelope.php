@@ -6,22 +6,22 @@ namespace Componenta\CQRS\Command\Transport;
 
 use InvalidArgumentException;
 
-/**
- * Serialized command for transport.
- */
+/** Serialized command and operation transport context. */
 final readonly class Envelope
 {
     /**
-     * @param string $operationId Operation ID for tracing
+     * @param string $operationId Operation ID for tracing and idempotency
      * @param string $commandClass Command FQCN
      * @param string $payload Serialized command
      * @param string|int|null $receiptHandle Transport-specific ID for ack/reject
+     * @param string $contextPayload Serialized allowlisted operation context
      */
     public function __construct(
         public string $operationId,
         public string $commandClass,
         public string $payload,
         public string|int|null $receiptHandle = null,
+        public string $contextPayload = '{}',
     ) {
         if (trim($this->operationId) === '') {
             throw new InvalidArgumentException('Transport operation ID cannot be empty or whitespace.');
@@ -36,18 +36,20 @@ final readonly class Envelope
                 'Transport receipt handle cannot be an empty string.',
             );
         }
+
+        if (trim($this->contextPayload) === '') {
+            throw new InvalidArgumentException('Transport operation context payload cannot be empty.');
+        }
     }
 
-    /**
-     * Returns new envelope with receipt handle.
-     */
     public function withReceiptHandle(string|int $receiptHandle): self
     {
         return new self(
-            $this->operationId,
-            $this->commandClass,
-            $this->payload,
-            $receiptHandle,
+            operationId: $this->operationId,
+            commandClass: $this->commandClass,
+            payload: $this->payload,
+            receiptHandle: $receiptHandle,
+            contextPayload: $this->contextPayload,
         );
     }
 }
