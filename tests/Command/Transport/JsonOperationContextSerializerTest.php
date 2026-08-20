@@ -23,6 +23,40 @@ it('round-trips only explicitly allowlisted operation attributes', function (): 
         ]);
 });
 
+it('preserves exact numeric JSON types including signed zero', function (): void {
+    $serializer = new JsonOperationContextSerializer(['values']);
+    $payload = $serializer->serialize(Operation::create(new stdClass(), [
+        'values' => [1, 1.0, -0.0],
+    ]));
+    $values = $serializer->deserialize($payload)['values'];
+
+    expect($values[0])->toBeInt()->toBe(1)
+        ->and($values[1])->toBeFloat()->toBe(1.0)
+        ->and($values[2])->toBeFloat()
+        ->and(pack('E', $values[2]))->toBe(pack('E', -0.0));
+});
+
+it('fails closed when PHP JSON precision would change context state', function (): void {
+    $previous = ini_get('serialize_precision');
+    ini_set('serialize_precision', '3');
+
+    try {
+        $serializer = new JsonOperationContextSerializer(['value']);
+
+        expect(fn() => $serializer->serialize(Operation::create(
+            new stdClass(),
+            ['value' => 1.2345678901234567],
+        )))->toThrow(
+            OperationContextSerializationException::class,
+            'JSON encoding changed operation transport context',
+        );
+    } finally {
+        if ($previous !== false) {
+            ini_set('serialize_precision', $previous);
+        }
+    }
+});
+
 it('rejects reserved runtime attributes in the allowlist', function (): void {
     expect(fn() => new JsonOperationContextSerializer(['__execution_mode']))
         ->toThrow(InvalidArgumentException::class, 'reserved');
