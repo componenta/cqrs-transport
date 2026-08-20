@@ -7,6 +7,7 @@ namespace Componenta\CQRS\Command\Factory;
 use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
 use Componenta\CQRS\Command\Middleware\TransportMiddleware;
 use Componenta\CQRS\Command\Transport\CommandSerializerInterface;
+use Componenta\CQRS\Command\Transport\OperationContextSerializerInterface;
 use Componenta\CQRS\Command\Transport\TransportRegistryInterface;
 use LogicException;
 use Psr\Container\ContainerInterface;
@@ -35,24 +36,31 @@ final class TransportMiddlewareFactory
             ));
         }
 
-        $metadata = null;
+        $metadata = $container->get(CommandMetadataProviderInterface::class);
 
-        if ($container->has(CommandMetadataProviderInterface::class)) {
-            $metadata = $container->get(CommandMetadataProviderInterface::class);
+        if (!$metadata instanceof CommandMetadataProviderInterface) {
+            throw new LogicException(sprintf(
+                'Container entry "%s" must implement %s.',
+                CommandMetadataProviderInterface::class,
+                CommandMetadataProviderInterface::class,
+            ));
+        }
 
-            if (!$metadata instanceof CommandMetadataProviderInterface) {
-                throw new LogicException(sprintf(
-                    'Container entry "%s" must implement %s.',
-                    CommandMetadataProviderInterface::class,
-                    CommandMetadataProviderInterface::class,
-                ));
-            }
+        $contextSerializer = $container->get(OperationContextSerializerInterface::class);
+
+        if (!$contextSerializer instanceof OperationContextSerializerInterface) {
+            throw new LogicException(sprintf(
+                'Container entry "%s" must implement %s.',
+                OperationContextSerializerInterface::class,
+                OperationContextSerializerInterface::class,
+            ));
         }
 
         return new TransportMiddleware(
             transports: $transports,
             serializer: $serializer,
             metadata: $metadata,
+            contextSerializer: $contextSerializer,
         );
     }
 }
