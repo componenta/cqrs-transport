@@ -12,8 +12,10 @@ use Componenta\CQRS\Command\Transport\JsonOperationContextSerializer;
 use Componenta\CQRS\Command\Transport\TransportDispositionException;
 use Componenta\CQRS\Command\Transport\TransportException;
 use Componenta\CQRS\Command\Transport\TransportInterface;
+use Componenta\CQRS\Map\CommandMetadataDescriptor;
 use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
+use Componenta\CQRS\Transport\Attribute\Async;
 
 final class WorkerDispositionTestBus implements CommandBusInterface
 {
@@ -83,19 +85,34 @@ function workerDispositionEnvelope(string $commandClass = stdClass::class): Enve
 
 function workerDispositionMap(string ...$commands): CqrsMapProviderInterface
 {
-    $known = [];
+    $metadata = [];
 
     foreach ($commands as $command) {
-        $known[$command] = true;
+        $metadata[$command][Async::class] = new CommandMetadataDescriptor(
+            Async::class,
+            [],
+        );
     }
 
-    return new class ($known) implements CqrsMapProviderInterface {
-        /** @param array<string, true> $known */
-        public function __construct(private readonly array $known) {}
+    return new class ($metadata) implements CqrsMapProviderInterface {
+        /** @param array<string, array<class-string, CommandMetadataDescriptor>> $metadata */
+        public function __construct(private readonly array $metadata) {}
 
         public function map(): CqrsMap
         {
-            return new CqrsMap(knownCommands: $this->known);
+            return new CqrsMap(commandMetadata: $this->metadata);
+        }
+    };
+}
+
+function workerDispositionKnownOnlyMap(string $command): CqrsMapProviderInterface
+{
+    return new class ($command) implements CqrsMapProviderInterface {
+        public function __construct(private readonly string $command) {}
+
+        public function map(): CqrsMap
+        {
+            return new CqrsMap(knownCommands: [$this->command => true]);
         }
     };
 }
@@ -168,6 +185,26 @@ it('rejects an envelope when a custom deserializer returns the wrong command typ
     );
 
     expect($worker->processOne())->toBeTrue()
+        ->and($transport->acks)->toBe(0)
+        ->and($transport->rejects)->toBe(1);
+});
+
+it('rejects a command without async metadata before deserialization even when CQRS knows it', function (): void {
+    $transport = new WorkerDispositionTestTransport(workerDispositionEnvelope());
+    $serializer = new class implements CommandSerializerInterface {
+        public int $calls = 0;
+        public function serialize(object $command): string { return '{}'; }
+        public function deserialize(string $payload, string $commandClass): object { ++$this->calls; return new stdClass(); }
+    };
+    $worker = workerDispositionWorker(
+        new WorkerDispositionTestBus(),
+        $serializer,
+        $transport,
+        workerDispositionKnownOnlyMap(stdClass::class),
+    );
+
+    expect($worker->processOne())->toBeTrue()
+        ->and($serializer->calls)->toBe(0)
         ->and($transport->acks)->toBe(0)
         ->and($transport->rejects)->toBe(1);
 });
