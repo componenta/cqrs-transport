@@ -127,6 +127,20 @@ it('rejects a JSON integer for a float constructor field', function (): void {
         ->toThrow(TransportException::class, 'must match float; int given');
 });
 
+it('rejects out-of-range JSON integers before PHP coerces them to float', function (): void {
+    $outOfRange = (string) PHP_INT_MAX . '0';
+    $payload = sprintf(
+        '{"__componenta_cqrs":%d,"data":{"value":%s}}',
+        JsonCommandSerializer::FORMAT_VERSION,
+        $outOfRange,
+    );
+
+    expect(fn() => (new JsonCommandSerializer())->deserialize(
+        $payload,
+        JsonMixedNumericCommand::class,
+    ))->toThrow(TransportException::class, 'integer outside the PHP integer range');
+});
+
 it('rejects numeric type mutation for mixed constructor-backed state', function (): void {
     $payload = json_encode([
         '__componenta_cqrs' => JsonCommandSerializer::FORMAT_VERSION,
