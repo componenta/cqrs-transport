@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Componenta\CQRS\Command\Transport;
 
 use Componenta\CQRS\Command\CommandBusInterface;
-use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
 use Componenta\CQRS\Command\Middleware\TransportMiddleware;
+use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -24,43 +24,28 @@ final class CommandWorker
     private readonly array $dispatchAttributes;
 
     /**
-     * The safe constructor is fail-closed: a complete command metadata provider
-     * is required before any envelope-selected class can be deserialized.
+     * The worker is fail-closed: envelope-selected command classes must be
+     * present in the active CQRS map before deserialization is attempted.
      *
-     * @param array<string, mixed> $dispatchAttributes Extra attributes passed to command re-dispatch.
+     * @param array<string, mixed> $dispatchAttributes Trusted attributes added by the worker.
      */
     public function __construct(
         private readonly CommandBusInterface $bus,
         private readonly CommandSerializerInterface $serializer,
+        private readonly OperationContextSerializerInterface $contextSerializer,
         private readonly TransportInterface $transport,
-        private readonly CommandMetadataProviderInterface $commands,
+        private readonly CqrsMapProviderInterface $commands,
         ?LoggerInterface $logger = null,
         array $dispatchAttributes = [],
     ) {
+        foreach ($dispatchAttributes as $attribute => $_) {
+            if (!is_string($attribute)) {
+                throw new InvalidArgumentException('Worker dispatch attribute names must be strings.');
+            }
+        }
+
         $this->logger = $logger ?? new NullLogger();
         $this->dispatchAttributes = $dispatchAttributes;
-    }
-
-    /**
-     * Explicitly disables command-class allowlisting.
-     *
-     * @param array<string, mixed> $dispatchAttributes
-     */
-    public static function unsafe(
-        CommandBusInterface $bus,
-        CommandSerializerInterface $serializer,
-        TransportInterface $transport,
-        ?LoggerInterface $logger = null,
-        array $dispatchAttributes = [],
-    ): self {
-        return new self(
-            $bus,
-            $serializer,
-            $transport,
-            new UnsafeCommandMetadataProvider(),
-            $logger,
-            $dispatchAttributes,
-        );
     }
 
     /** @phpstan-impure */
@@ -73,7 +58,7 @@ final class CommandWorker
         }
 
         try {
-            if (!$this->commands->isKnown($envelope->commandClass)) {
+            if (!$this->commands->map()->isKnownCommand($envelope->commandClass)) {
                 throw new TransportException(sprintf(
                     'Transported command class "%s" is not present in the configured CQRS command map.',
                     $envelope->commandClass,
@@ -98,7 +83,19 @@ final class CommandWorker
                 ));
             }
 
+            $context = $this->contextSerializer->deserialize($envelope->contextPayload);
+
+            foreach ($context as $attribute => $_) {
+                if (str_starts_with($attribute, '__')) {
+                    throw new TransportException(sprintf(
+                        'Transported operation context contains reserved runtime attribute "%s".',
+                        $attribute,
+                    ));
+                }
+            }
+
             $this->bus->dispatch($command, [
+                ...$context,
                 ...$this->dispatchAttributes,
                 self::ATTR_ORIGINAL_OPERATION_ID => $envelope->operationId,
                 TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::SYNC,
