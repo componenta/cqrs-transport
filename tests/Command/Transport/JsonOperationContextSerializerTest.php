@@ -36,6 +36,17 @@ it('preserves exact numeric JSON types including signed zero', function (): void
         ->and(pack('E', $values[2]))->toBe(pack('E', -0.0));
 });
 
+it('rejects out-of-range JSON integers before PHP coerces them to float', function (): void {
+    $serializer = new JsonOperationContextSerializer(['value']);
+    $outOfRange = (string) PHP_INT_MAX . '0';
+
+    expect(fn() => $serializer->deserialize(sprintf('{"value":%s}', $outOfRange)))
+        ->toThrow(
+            OperationContextSerializationException::class,
+            'integer outside the PHP integer range',
+        );
+});
+
 it('fails closed when PHP JSON precision would change context state', function (): void {
     $previous = ini_get('serialize_precision');
     ini_set('serialize_precision', '3');
