@@ -67,6 +67,11 @@ it('rejects non-string allowlist entries', function (): void {
         ->toThrow(InvalidArgumentException::class, 'non-empty string');
 });
 
+it('rejects allowlist names PHP would convert to integer array keys', function (): void {
+    expect(fn() => new JsonOperationContextSerializer(['0']))
+        ->toThrow(InvalidArgumentException::class, 'integer array key');
+});
+
 it('rejects non-allowlisted attributes from incoming payloads', function (): void {
     $serializer = new JsonOperationContextSerializer(['tenant']);
 
