@@ -14,12 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         php: ['8.4', '8.5']
-        cqrs: ['2.0.0', '3.0.0']
     steps:
       - uses: actions/checkout@v7
+      - name: Checkout current CQRS v4 source
+        uses: actions/checkout@v7
+        with:
+          repository: componenta/cqrs
+          ref: main
+          path: .ci/cqrs
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
@@ -28,9 +32,11 @@ jobs:
       - name: Configure Composer authentication
         run: composer config --global github-oauth.github.com "${{ github.token }}"
       - run: composer validate --strict
-      - name: Select CQRS version
-        run: composer require --no-update "componenta/cqrs:${{ matrix.cqrs }}"
-      - name: Install dependency matrix
+      - name: Use current CQRS v4 source
+        run: >-
+          composer config --json repositories.componenta-cqrs
+          '{"type":"path","url":".ci/cqrs","options":{"versions":{"componenta/cqrs":"4.0.0"}}}'
+      - name: Install dependencies
         shell: bash
         env:
           COMPOSER_MAX_PARALLEL_HTTP: 2
