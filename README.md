@@ -1,16 +1,20 @@
 # Componenta CQRS Transport
 
-Async transport middleware, transport contracts, JSON command serializers, registry, and worker for `componenta/cqrs` commands marked with `#[Componenta\CQRS\Transport\Attribute\Async]`.
+Async transport middleware, transport contracts, command serializers, operation-context serialization, registry, and worker for `componenta/cqrs` commands marked with `#[Componenta\CQRS\Transport\Attribute\Async]`.
+
+`main` is the transport v5 line.
 
 ```bash
 composer require componenta/cqrs-transport
 ```
 
-Register the provider after the core CQRS provider. The package deliberately does not choose transports or a serializer for the application: bind `TransportRegistryInterface` and `CommandSerializerInterface`, and register the named transports the application uses.
+Register `Componenta\CQRS\Transport\ConfigProvider` after the core CQRS provider. The package does not choose a concrete transport or command serializer for the application: bind `TransportRegistryInterface` and `CommandSerializerInterface`, then register the named transports used by the application.
+
+The provider supplies a safe default `OperationContextSerializerInterface`: `JsonOperationContextSerializer` with an empty allowlist, which transports no application attributes unless the application explicitly opts them in.
 
 ## Command serializers
 
-`CommandSerializerInterface` remains the wire conversion contract:
+`CommandSerializerInterface` owns only command wire conversion:
 
 ```php
 interface CommandSerializerInterface
@@ -21,34 +25,21 @@ interface CommandSerializerInterface
 }
 ```
 
-Serializers that participate in automatic selection additionally implement:
-
-```php
-interface CommandSerializerSupportInterface
-{
-    public function supportsCommand(object|string $command): bool;
-}
-```
-
-`CompositeCommandSerializer` accepts an ordered iterable of objects implementing both interfaces. The first serializer whose `supportsCommand()` returns `true` owns the operation. A failure from that serializer is final; the composite never treats a serialization or validation exception as a reason to try the next serializer.
+Serializers that participate in automatic selection additionally implement `CommandSerializerSupportInterface`. `CompositeCommandSerializer` tries support predicates in order; once a serializer claims a command class, any serialization/validation failure from that serializer is final.
 
 ```php
 $serializer = new CompositeCommandSerializer([
     $applicationSpecificSerializer,
     $specializedSerializer,
-    new JsonCommandSerializer(), // broad fallback belongs last
+    new JsonCommandSerializer(),
 ]);
 ```
 
-Selection must be stable for a command class. Serialization can pass an object, while deserialization has only the class name; therefore `supportsCommand($instance)` and `supportsCommand($instance::class)` must return the same result. The composite verifies that invariant while serializing and rejects instance-dependent ownership. A support predicate must be deterministic and side-effect free.
+Selection must be stable between a command instance and its class name because deserialization has only the class name. The composite rejects instance-dependent ownership.
 
-If one command class can carry several domain actor/value variants, a custom serializer cannot claim only selected instances of that class. It must own the whole command class and handle its supported wire variants itself, or the command types must be separated.
+### Default JSON command contract
 
-`JsonCommandSerializer` implements the support interface and deliberately reports support for every command type, so it is normally the final fallback.
-
-### Default JSON wire contract
-
-The default serializer accepts only the current versioned wire envelope:
+`JsonCommandSerializer` accepts the versioned wire envelope:
 
 ```json
 {
@@ -59,39 +50,97 @@ The default serializer accepts only the current versioned wire envelope:
 }
 ```
 
-Unversioned payloads are rejected.
+It accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and recursively JSON-safe arrays. It rejects executable callable/Closure capabilities, arbitrary objects, private or inherited private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, unknown fields, excessive nesting, and reconstructed commands whose constructor changes the serialized state.
 
-The default JSON serializer accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and arrays of the same values. Integer and float are distinct wire types: floats are emitted with their fractional form preserved, including signed zero, and a JSON integer is not accepted for a `float` constructor field. After encoding, the serializer decodes its own payload and verifies that JSON preserved the exact state, so a lossy PHP `serialize_precision` setting fails closed instead of changing command data silently.
+Incoming shape and type are validated before command construction. The serializer also verifies its own encoded payload so lossy float conversion fails closed.
 
-The serializer rejects executable callable/Closure capability types, arbitrary objects, private state including inherited private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, excessive array nesting, unknown fields, and reconstructed commands whose constructor changes serialized state.
+## Operation transport context
 
-Dynamic runtime state is rejected both before serialization and after reconstruction. A command therefore cannot silently lose `#[AllowDynamicProperties]` state that is outside the declared constructor-backed wire contract.
+A command serializer must not serialize the complete `OperationInterface`. Command state and operation runtime state are separate concerns.
 
-Incoming field shape, type, and nesting are validated before command construction. Invalid or excessively deep payloads therefore cannot execute a command constructor before being rejected. Richer command formats belong in a specialized serializer ordered before the JSON fallback.
+Transport v5 therefore uses a dedicated boundary:
 
-## Worker deserialization boundary
+```php
+interface OperationContextSerializerInterface
+{
+    public function serialize(OperationInterface $operation): string;
 
-The normal `CommandWorker` constructor is fail-closed and requires a complete `CommandMetadataProviderInterface`. The envelope-selected class is checked before `class_exists()` and before serializer hydration:
+    /** @return array<string, mixed> */
+    public function deserialize(string $payload): array;
+}
+```
+
+The transport envelope carries:
+
+- `operationId` separately for idempotency/correlation;
+- `commandClass` and command `payload` through `CommandSerializerInterface`;
+- `contextPayload` through `OperationContextSerializerInterface`.
+
+`result`, completion state, and the runtime `Operation` object itself are never serialized. The worker creates its normal execution operation when it re-dispatches the command and exposes the producer ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`.
+
+### Safe JSON context
+
+`JsonOperationContextSerializer` uses an explicit attribute allowlist:
+
+```php
+$contextSerializer = new JsonOperationContextSerializer([
+    'tenant_id',
+    'trace_id',
+    'locale',
+]);
+```
+
+Only listed attributes cross the async boundary. Values must be JSON-safe scalars/arrays; arbitrary objects and non-finite floats are rejected.
+
+Attribute names beginning with `__` are reserved for trusted runtime state and cannot be allowlisted. The worker independently rejects reserved attributes even when a custom context serializer is used. This prevents transported data from supplying flags such as `__execution_mode` or other technical bypass state.
+
+The default serializer has an empty allowlist, so existing application attributes remain process-local unless deliberately declared transportable.
+
+## Worker class boundary
+
+`CommandWorker` is fail-closed. The command class selected by an envelope must be present in the active `CqrsMapProviderInterface` map **before** `class_exists()` and before serializer hydration:
 
 ```php
 $worker = new CommandWorker(
     bus: $commandBus,
-    serializer: $serializer,
+    serializer: $commandSerializer,
+    contextSerializer: $operationContextSerializer,
     transport: $transport,
-    commands: $compiledCommandMetadata,
+    commands: $cqrsMapProvider,
 );
 ```
 
-For an integrity-protected transport whose producers are all trusted, unrestricted behavior must be selected explicitly:
+There is no unrestricted `unsafe()` construction path in v5. A generic reflection metadata provider is not a command-class allowlist.
 
-```php
-$worker = CommandWorker::unsafe($commandBus, $serializer, $transport);
+The class map restricts which command types may be hydrated; it does not authenticate payload fields. If less-trusted actors can modify queued messages, integrity protection must cover the complete transport message at the transport/storage boundary.
+
+After successful deserialization the worker merges attributes with this precedence:
+
+```text
+transported allowlisted context
+  < trusted worker dispatch attributes
+  < __original_operation_id / __execution_mode=SYNC
 ```
 
-Do not use the unsafe factory for queues writable by a less-trusted actor. The class allowlist restricts which command types can be hydrated; it does not authenticate individual payload fields. Any transported business data or actor reference is a reference supplied by the producer, not an authentication credential. If untrusted parties can modify queued messages, integrity protection must cover the complete envelope/payload rather than one selected field.
+Trusted runtime attributes therefore cannot be overridden by queued data.
 
-The worker sets `ExecutionMode::SYNC` before dispatch and exposes the producer ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`. It does not know about policy-specific skip attributes. Put policy before transport to authorize before enqueue, or provide a trusted worker policy context deliberately.
+## Retry and producer sends
 
-Transport outside `SequentialMiddleware` can publish a nested async command before the parent transaction commits. Use an outbox for durable cross-system delivery.
+A generic `TransportInterface` does not promise that `send()` is idempotent. A connection can fail after the transport accepted the message but before the producer observed success.
+
+`TransportMiddleware` wraps producer-side send failures in `TransportSendException`, which is intentionally not retryable by default. This prevents generic command retry middleware from blindly duplicating an ambiguous enqueue. A concrete transport may provide stronger idempotency guarantees (for example by operation ID) and may implement its own safe producer retry policy.
+
+## Policy, transactions, and outbox
+
+Authorize before enqueue when queueing itself must be authorized: policy middleware must run outside transport middleware.
+
+Nested `CommandBusInterface::dispatch()` calls are normal reentrant dispatches; the core no longer has `SequentialMiddleware`. If an async message must become visible only after a database transaction commits, use an outbox or another explicit after-commit mechanism. Middleware ordering alone cannot make an external transport atomic with a local database transaction.
 
 For Cycle Database transport install `componenta/cqrs-transport-cycle`; for the Symfony Console worker install `componenta/cqrs-transport-console`.
+
+## Verification
+
+```bash
+composer test
+composer analyse
+```
