@@ -13,24 +13,29 @@ use Componenta\CQRS\Command\Transport\ExecutionMode;
 use Componenta\CQRS\Command\Transport\JsonOperationContextSerializer;
 use Componenta\CQRS\Command\Transport\OperationContextSerializerInterface;
 use Componenta\CQRS\Command\Transport\TransportInterface;
+use Componenta\CQRS\Map\CommandMetadataDescriptor;
 use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
+use Componenta\CQRS\Transport\Attribute\Async;
 
 function workerTestMap(string ...$commands): CqrsMapProviderInterface
 {
-    $known = [];
+    $metadata = [];
 
     foreach ($commands as $command) {
-        $known[$command] = true;
+        $metadata[$command][Async::class] = new CommandMetadataDescriptor(
+            Async::class,
+            [],
+        );
     }
 
-    return new class ($known) implements CqrsMapProviderInterface {
-        /** @param array<string, true> $known */
-        public function __construct(private readonly array $known) {}
+    return new class ($metadata) implements CqrsMapProviderInterface {
+        /** @param array<string, array<class-string, CommandMetadataDescriptor>> $metadata */
+        public function __construct(private readonly array $metadata) {}
 
         public function map(): CqrsMap
         {
-            return new CqrsMap(knownCommands: $this->known);
+            return new CqrsMap(commandMetadata: $this->metadata);
         }
     };
 }
