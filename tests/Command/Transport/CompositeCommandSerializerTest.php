@@ -58,6 +58,11 @@ final class CompositeRecordingSerializer implements CommandSerializerInterface, 
     }
 }
 
+it('rejects serializers that do not implement both composite contracts', function (): void {
+    expect(fn() => new CompositeCommandSerializer([new stdClass()]))
+        ->toThrow(InvalidArgumentException::class, 'must implement both');
+});
+
 it('delegates serialization to the first supporting serializer', function (): void {
     $command = new CompositeSpecialCommand(1);
     $first = new CompositeRecordingSerializer(
