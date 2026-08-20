@@ -59,8 +59,10 @@ final readonly class TransportMiddleware implements MiddlewareInterface
             contextPayload: $this->contextSerializer->serialize($operation),
         );
 
+        $transport = $this->transports->get($async->transport);
+
         try {
-            $this->transports->get($async->transport)->send(
+            $transport->send(
                 $envelope,
                 delay: $async->delay,
             );
