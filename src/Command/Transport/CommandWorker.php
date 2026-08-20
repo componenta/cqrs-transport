@@ -119,6 +119,12 @@ final class CommandWorker
             $context = $this->contextSerializer->deserialize($envelope->contextPayload);
 
             foreach ($context as $attribute => $_) {
+                if (!is_string($attribute)) {
+                    throw new TransportException(
+                        'Transported operation context attribute names must be strings.',
+                    );
+                }
+
                 if (str_starts_with($attribute, '__')) {
                     throw new TransportException(sprintf(
                         'Transported operation context contains reserved runtime attribute "%s".',
