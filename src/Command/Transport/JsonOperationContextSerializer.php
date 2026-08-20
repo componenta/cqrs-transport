@@ -38,6 +38,13 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
                 ));
             }
 
+            if (!is_string(array_key_first([$attribute => true]))) {
+                throw new InvalidArgumentException(sprintf(
+                    'Transportable operation attribute "%s" is converted by PHP to an integer array key.',
+                    $attribute,
+                ));
+            }
+
             if (str_starts_with($attribute, '__')) {
                 throw new InvalidArgumentException(sprintf(
                     'Operation attribute "%s" is reserved for trusted runtime state and cannot be transported.',
