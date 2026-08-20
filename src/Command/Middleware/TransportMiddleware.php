@@ -16,7 +16,15 @@ use Componenta\CQRS\Transport\Attribute\Async;
 use Throwable;
 
 /** Sends commands marked with #[Async] to transport. */
-#[MiddlewareOrder(after: [PolicyMiddleware::class])]
+#[MiddlewareOrder(
+    before: [
+        EventMiddleware::class,
+        ResourceLockMiddleware::class,
+        RetryMiddleware::class,
+        TransactionMiddleware::class,
+    ],
+    after: [PolicyMiddleware::class],
+)]
 final readonly class TransportMiddleware implements MiddlewareInterface
 {
     public const string ATTR_EXECUTION_MODE = '__execution_mode';
