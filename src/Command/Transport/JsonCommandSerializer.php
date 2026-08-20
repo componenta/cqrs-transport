@@ -39,15 +39,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
 
     public function deserialize(string $payload, string $commandClass): object
     {
-        try {
-            $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
-        } catch (JsonException $exception) {
-            throw new TransportException(
-                "Failed to deserialize command: {$exception->getMessage()}",
-                previous: $exception,
-            );
-        }
-
+        $decoded = $this->decodePayload($payload);
         $data = $this->payloadData($decoded);
 
         if (!class_exists($commandClass)) {
@@ -109,6 +101,66 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $this->assertRoundTripState($command, $expectedState, $properties, $commandClass);
 
         return $command;
+    }
+
+    private function decodePayload(string $payload): mixed
+    {
+        try {
+            $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+            $bigIntegerAware = json_decode(
+                $payload,
+                true,
+                512,
+                JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING,
+            );
+        } catch (JsonException $exception) {
+            throw new TransportException(
+                "Failed to deserialize command: {$exception->getMessage()}",
+                previous: $exception,
+            );
+        }
+
+        if (self::containsOutOfRangeJsonInteger($decoded, $bigIntegerAware)) {
+            throw new TransportException(
+                'Command payload contains an integer outside the PHP integer range.',
+            );
+        }
+
+        return $decoded;
+    }
+
+    private static function containsOutOfRangeJsonInteger(mixed $decoded, mixed $bigIntegerAware): bool
+    {
+        $stack = [[$decoded, $bigIntegerAware]];
+
+        while ($stack !== []) {
+            [$value, $aware] = array_pop($stack);
+
+            if (is_float($value)
+                && is_string($aware)
+                && preg_match('/^-?[0-9]+$/D', $aware) === 1
+            ) {
+                return true;
+            }
+
+            if (is_array($value) !== is_array($aware)) {
+                return true;
+            }
+
+            if (!is_array($value)) {
+                continue;
+            }
+
+            if (array_keys($value) !== array_keys($aware)) {
+                return true;
+            }
+
+            foreach ($value as $key => $nested) {
+                $stack[] = [$nested, $aware[$key]];
+            }
+        }
+
+        return false;
     }
 
     /** @param array<string, mixed> $data */
