@@ -21,7 +21,7 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
     /** @var array<string, true> */
     private array $allowedAttributes;
 
-    /** @param list<string> $allowedAttributes */
+    /** @param array<array-key, mixed> $allowedAttributes */
     public function __construct(array $allowedAttributes = [])
     {
         if (!array_is_list($allowedAttributes)) {
@@ -31,7 +31,7 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
         $allowed = [];
 
         foreach ($allowedAttributes as $index => $attribute) {
-            if (trim($attribute) === '') {
+            if (!is_string($attribute) || trim($attribute) === '') {
                 throw new InvalidArgumentException(sprintf(
                     'Transportable operation attribute at index %d must be a non-empty string.',
                     $index,
@@ -110,7 +110,7 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
             );
         }
 
-        if (!is_array($context) || array_is_list($context) && $context !== []) {
+        if (!is_array($context) || (array_is_list($context) && $context !== [])) {
             throw new OperationContextSerializationException(
                 'Operation transport context must be a JSON object.',
             );
