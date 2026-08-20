@@ -18,14 +18,14 @@ use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Transport\Attribute\Async;
 
-function workerTestMap(string ...$commands): CqrsMapProviderInterface
+function workerTestMapForTransport(string $transport, string ...$commands): CqrsMapProviderInterface
 {
     $metadata = [];
 
     foreach ($commands as $command) {
         $metadata[$command][Async::class] = new CommandMetadataDescriptor(
             Async::class,
-            [],
+            ['transport' => $transport],
         );
     }
 
@@ -79,11 +79,12 @@ it('re-dispatches transported commands with restored operation context and worke
     };
 
     $worker = new CommandWorker(
-        $bus,
-        $serializer,
-        new JsonOperationContextSerializer(['tenant', 'trace']),
-        $transport,
-        workerTestMap(stdClass::class),
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: new JsonOperationContextSerializer(['tenant', 'trace']),
+        transport: $transport,
+        transportName: 'default',
+        commands: workerTestMapForTransport('default', stdClass::class),
         dispatchAttributes: ['tenant' => 'worker'],
     );
 
@@ -97,6 +98,43 @@ it('re-dispatches transported commands with restored operation context and worke
         ])
         ->and($transport->acks)->toBe(1)
         ->and($transport->rejects)->toBe(0);
+});
+
+it('rejects a command routed to a different transport before hydration', function (): void {
+    $envelope = new Envelope('operation-id', stdClass::class, '{}', 'receipt-id');
+    $bus = new class implements CommandBusInterface {
+        public int $calls = 0;
+        public function dispatch(object $command, array $attributes = []): OperationInterface { ++$this->calls; return Operation::create($command, $attributes); }
+    };
+    $serializer = new class implements CommandSerializerInterface {
+        public int $calls = 0;
+        public function serialize(object $command): string { return '{}'; }
+        public function deserialize(string $payload, string $commandClass): object { ++$this->calls; return new stdClass(); }
+    };
+    $transport = new class ($envelope) implements TransportInterface {
+        public int $acks = 0;
+        public int $rejects = 0;
+        public function __construct(private ?Envelope $envelope) {}
+        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
+        public function get(): ?Envelope { $value = $this->envelope; $this->envelope = null; return $value; }
+        public function ack(Envelope $envelope): void { ++$this->acks; }
+        public function reject(Envelope $envelope): void { ++$this->rejects; }
+    };
+
+    $worker = new CommandWorker(
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'emails',
+        commands: workerTestMapForTransport('payments', stdClass::class),
+    );
+
+    expect($worker->processOne())->toBeTrue()
+        ->and($serializer->calls)->toBe(0)
+        ->and($bus->calls)->toBe(0)
+        ->and($transport->acks)->toBe(0)
+        ->and($transport->rejects)->toBe(1);
 });
 
 it('keeps sync execution mode authoritative over worker dispatch attributes', function (): void {
@@ -124,11 +162,12 @@ it('keeps sync execution mode authoritative over worker dispatch attributes', fu
         public function reject(Envelope $envelope): void {}
     };
     $worker = new CommandWorker(
-        $bus,
-        $serializer,
-        new JsonOperationContextSerializer(),
-        $transport,
-        workerTestMap(stdClass::class),
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+        commands: workerTestMapForTransport('default', stdClass::class),
         dispatchAttributes: [
             'tenant' => 'main',
             TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::ASYNC,
@@ -168,15 +207,41 @@ it('rejects reserved attributes returned by a custom context serializer', functi
         public function reject(Envelope $envelope): void { ++$this->rejects; }
     };
     $worker = new CommandWorker(
-        $bus,
-        $serializer,
-        $context,
-        $transport,
-        workerTestMap(stdClass::class),
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: $context,
+        transport: $transport,
+        transportName: 'default',
+        commands: workerTestMapForTransport('default', stdClass::class),
     );
 
     expect($worker->processOne())->toBeTrue()
         ->and($bus->calls)->toBe(0)
         ->and($transport->acks)->toBe(0)
         ->and($transport->rejects)->toBe(1);
+});
+
+it('rejects empty worker transport names at construction', function (): void {
+    $transport = new class implements TransportInterface {
+        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
+        public function get(): ?Envelope { return null; }
+        public function ack(Envelope $envelope): void {}
+        public function reject(Envelope $envelope): void {}
+    };
+    $bus = new class implements CommandBusInterface {
+        public function dispatch(object $command, array $attributes = []): OperationInterface { return Operation::create($command, $attributes); }
+    };
+    $serializer = new class implements CommandSerializerInterface {
+        public function serialize(object $command): string { return '{}'; }
+        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    };
+
+    expect(fn() => new CommandWorker(
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: '   ',
+        commands: workerTestMapForTransport('default', stdClass::class),
+    ))->toThrow(InvalidArgumentException::class, 'transport name');
 });
