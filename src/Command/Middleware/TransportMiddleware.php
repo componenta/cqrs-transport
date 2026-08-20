@@ -19,11 +19,11 @@ use Throwable;
 #[MiddlewareOrder(
     before: [
         EventMiddleware::class,
-        ResourceLockMiddleware::class,
-        RetryMiddleware::class,
-        TransactionMiddleware::class,
+        'Componenta\\CQRS\\Command\\Middleware\\ResourceLockMiddleware',
+        'Componenta\\CQRS\\Command\\Middleware\\RetryMiddleware',
+        'Componenta\\CQRS\\Command\\Middleware\\TransactionMiddleware',
     ],
-    after: [PolicyMiddleware::class],
+    after: ['Componenta\\CQRS\\Command\\Middleware\\PolicyMiddleware'],
 )]
 final readonly class TransportMiddleware implements MiddlewareInterface
 {
