@@ -7,6 +7,7 @@ namespace Componenta\CQRS\Command\Transport;
 use Componenta\CQRS\Command\CommandBusInterface;
 use Componenta\CQRS\Command\Middleware\TransportMiddleware;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
+use Componenta\CQRS\Transport\Attribute\Async;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -25,7 +26,8 @@ final class CommandWorker
 
     /**
      * The worker is fail-closed: envelope-selected command classes must be
-     * present in the active CQRS map before deserialization is attempted.
+     * explicitly declared transportable through Async metadata in the active
+     * CQRS map before deserialization is attempted.
      *
      * @param array<string, mixed> $dispatchAttributes Trusted attributes added by the worker.
      */
@@ -58,9 +60,9 @@ final class CommandWorker
         }
 
         try {
-            if (!$this->commands->map()->isKnownCommand($envelope->commandClass)) {
+            if ($this->commands->map()->commandMetadata($envelope->commandClass, Async::class) === null) {
                 throw new TransportException(sprintf(
-                    'Transported command class "%s" is not present in the configured CQRS command map.',
+                    'Transported command class "%s" is not declared async in the configured CQRS command map.',
                     $envelope->commandClass,
                 ));
             }
