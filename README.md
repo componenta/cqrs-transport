@@ -53,7 +53,7 @@ The transport envelope carries:
 - `commandClass` and command `payload` through `CommandSerializerInterface`;
 - `contextPayload` through `OperationContextSerializerInterface`.
 
-`result`, completion state, and the runtime `Operation` object itself are never serialized. The worker creates its normal execution operation when it re-dispatches the command and exposes the producer ID as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`.
+`result`, completion state, `Operation::createdAt`, and the runtime `Operation` object itself are never serialized. `createdAt` describes creation of one local operation object; a worker creates a new execution operation when it re-dispatches the command. The producer operation ID remains available as `CommandWorker::ATTR_ORIGINAL_OPERATION_ID`. If end-to-end queue latency is required later, model a dedicated transport timestamp such as `dispatchedAt` rather than reusing the worker operation creation time.
 
 ### Safe JSON context
 
