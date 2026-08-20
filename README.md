@@ -106,18 +106,23 @@ Trusted runtime attributes therefore cannot be overridden by queued data.
 
 ## Middleware order
 
-CQRS v4 validates hard middleware-order constraints before the command pipeline is compiled. Transport v5 declares the async boundary as:
+Middleware placement is controlled by the application. `TransportMiddleware` does not declare or enforce dependencies on policy, event, lock, retry, transaction, or custom middleware.
+
+A common producer-side topology is:
 
 ```text
-PolicyMiddleware            (when present)
+PolicyMiddleware
   TransportMiddleware
-    EventMiddleware         (when present)
-    ResourceLockMiddleware  (when present)
-    RetryMiddleware         (when present)
-    TransactionMiddleware   (when present)
+    EventMiddleware
+    ResourceLockMiddleware
+    RetryMiddleware
+    TransactionMiddleware
+    handler
 ```
 
-Authorization happens before enqueue. Execution lifecycle events, resource locks, retries, and local command transactions belong to actual command execution, not to producer-side enqueue. On worker redispatch `ExecutionMode::SYNC` makes transport pass through, so those middleware execute normally around the handler.
+With this order, authorization happens before enqueue and an async command short-circuits at transport before execution-only middleware. On worker redispatch `ExecutionMode::SYNC` makes transport pass through, so the downstream middleware execute around the actual handler.
+
+Other orders are technically valid and intentionally not rejected. For example, placing policy inside transport means authorization occurs only after worker redispatch, while placing event middleware outside transport means producer-side queueing participates in those lifecycle events. Applications choose the semantics explicitly.
 
 If an async message must become visible only after a separate local database transaction commits, use an outbox or another explicit after-commit mechanism. Middleware ordering cannot make an external transport atomic with an unrelated local transaction.
 
@@ -125,7 +130,7 @@ If an async message must become visible only after a separate local database tra
 
 A generic `TransportInterface` does not promise that `send()` is idempotent. A connection can fail after the transport accepted the message but before the producer observed success.
 
-`TransportMiddleware` wraps exceptions thrown specifically by `TransportInterface::send()` in `TransportSendException`, which is intentionally not retryable by default. Registry/configuration failures are not mislabeled as ambiguous send failures. Transport is also ordered before `RetryMiddleware`, so generic command retry does not wrap producer-side enqueue. A concrete transport may provide stronger idempotency guarantees and may implement its own safe producer retry policy.
+`TransportMiddleware` wraps exceptions thrown specifically by `TransportInterface::send()` in `TransportSendException`, which is intentionally not retryable by default. Registry/configuration failures are not mislabeled as ambiguous send failures. If application configuration places generic retry outside transport and explicitly marks transport-send failures retryable, duplicate enqueue risk becomes an application responsibility unless the concrete transport guarantees idempotent send semantics.
 
 For Cycle Database transport install `componenta/cqrs-transport-cycle`; for the Symfony Console worker install `componenta/cqrs-transport-console`.
 
