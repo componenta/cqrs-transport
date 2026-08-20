@@ -13,7 +13,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
 
-/** Processes commands from transport. */
+/** Processes commands from one named transport. */
 final class CommandWorker
 {
     public const string ATTR_ORIGINAL_OPERATION_ID = '__original_operation_id';
@@ -26,8 +26,8 @@ final class CommandWorker
 
     /**
      * The worker is fail-closed: envelope-selected command classes must be
-     * explicitly declared transportable through Async metadata in the active
-     * CQRS map before deserialization is attempted.
+     * explicitly declared async for this exact transport name in the active
+     * CQRS map before class loading or deserialization is attempted.
      *
      * @param array<string, mixed> $dispatchAttributes Trusted attributes added by the worker.
      */
@@ -36,10 +36,15 @@ final class CommandWorker
         private readonly CommandSerializerInterface $serializer,
         private readonly OperationContextSerializerInterface $contextSerializer,
         private readonly TransportInterface $transport,
+        private readonly string $transportName,
         private readonly CqrsMapProviderInterface $commands,
         ?LoggerInterface $logger = null,
         array $dispatchAttributes = [],
     ) {
+        if (trim($this->transportName) === '') {
+            throw new InvalidArgumentException('Worker transport name cannot be empty or whitespace.');
+        }
+
         foreach ($dispatchAttributes as $attribute => $_) {
             if (!is_string($attribute)) {
                 throw new InvalidArgumentException('Worker dispatch attribute names must be strings.');
@@ -60,15 +65,41 @@ final class CommandWorker
         }
 
         try {
-            if ($this->commands->map()->commandMetadata($envelope->commandClass, Async::class) === null) {
+            $descriptor = $this->commands->map()->commandMetadata(
+                $envelope->commandClass,
+                Async::class,
+            );
+
+            if ($descriptor === null) {
                 throw new TransportException(sprintf(
                     'Transported command class "%s" is not declared async in the configured CQRS command map.',
                     $envelope->commandClass,
                 ));
             }
 
+            try {
+                $async = new Async(...$descriptor->arguments);
+            } catch (Throwable $exception) {
+                throw new TransportException(sprintf(
+                    'Invalid Async metadata for transported command class "%s": %s',
+                    $envelope->commandClass,
+                    $exception->getMessage(),
+                ), previous: $exception);
+            }
+
+            if ($async->transport !== $this->transportName) {
+                throw new TransportException(sprintf(
+                    'Transported command class "%s" is declared for transport "%s", not worker transport "%s".',
+                    $envelope->commandClass,
+                    $async->transport,
+                    $this->transportName,
+                ));
+            }
+
             if (!class_exists($envelope->commandClass)) {
-                throw new TransportException("Transported command class '{$envelope->commandClass}' does not exist.");
+                throw new TransportException(
+                    "Transported command class '{$envelope->commandClass}' does not exist.",
+                );
             }
 
             $commandClass = $envelope->commandClass;
