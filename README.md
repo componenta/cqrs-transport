@@ -29,7 +29,7 @@ Serializers that participate in automatic selection additionally implement `Comm
 
 `JsonCommandSerializer` accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and recursively JSON-safe arrays. It rejects executable callable/Closure capabilities, arbitrary objects, private or inherited private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, unknown fields, excessive nesting, and reconstructed commands whose constructor changes serialized state.
 
-Incoming shape and type are validated before command construction. The serializer also verifies its own encoded payload so lossy numeric conversion fails closed.
+Incoming shape and type are validated before command construction. The serializer verifies its own encoded payload so lossy numeric conversion fails closed.
 
 ## Operation transport context
 
@@ -67,19 +67,15 @@ $contextSerializer = new JsonOperationContextSerializer([
 ]);
 ```
 
-Only listed attributes cross the async boundary. Values must be JSON-safe scalars/arrays; arbitrary objects and non-finite floats are rejected.
+Only listed attributes cross the async boundary. Values must be JSON-safe scalars/arrays; arbitrary objects and non-finite floats are rejected. The serializer preserves exact integer/float wire types, signed zero, and fails closed when PHP JSON precision would alter context data.
 
 Attribute names beginning with `__` are reserved for trusted runtime state and cannot be allowlisted. The worker independently rejects reserved attributes even when a custom context serializer is used. The default serializer has an empty allowlist, so application attributes remain process-local unless deliberately declared transportable.
 
-## Worker hydration boundary
+## Worker hydration and queue boundary
 
-`CommandWorker` is fail-closed. Before `class_exists()` and before serializer hydration, the envelope-selected class must have compiled `Async` metadata in the active `CqrsMapProviderInterface` map:
+`CommandWorker` is fail-closed. Before `class_exists()` and before serializer hydration, the envelope-selected class must have compiled `Async` metadata in the active `CqrsMapProviderInterface` map **for the exact logical transport processed by this worker**.
 
-```php
-$map->commandMetadata($envelope->commandClass, Async::class) !== null
-```
-
-Being merely present in `knownCommands`, listener metadata, or unrelated command metadata is not sufficient.
+Being merely present in `knownCommands`, listener metadata, unrelated command metadata, or `Async` metadata for another transport is not sufficient.
 
 ```php
 $worker = new CommandWorker(
@@ -87,9 +83,12 @@ $worker = new CommandWorker(
     serializer: $commandSerializer,
     contextSerializer: $operationContextSerializer,
     transport: $transport,
+    transportName: 'payments',
     commands: $cqrsMapProvider,
 );
 ```
+
+For a command declared as `#[Async('payments')]`, a worker bound to `emails` rejects the envelope before command class loading or deserialization even if the same physical transport implementation could expose that message.
 
 There is no unrestricted `unsafe()` construction path in v5. A generic reflection metadata provider is not a command-class allowlist. The standard CQRS v4 metadata provider is strictly map-backed, so producer routing and worker acceptance use the same compiled metadata contract.
 
@@ -110,12 +109,12 @@ Trusted runtime attributes therefore cannot be overridden by queued data.
 CQRS v4 validates hard middleware-order constraints before the command pipeline is compiled. Transport v5 declares the async boundary as:
 
 ```text
-PolicyMiddleware        (when present)
+PolicyMiddleware            (when present)
   TransportMiddleware
-    EventMiddleware     (when present)
-    ResourceLockMiddleware (when present)
-    RetryMiddleware     (when present)
-    TransactionMiddleware (when present)
+    EventMiddleware         (when present)
+    ResourceLockMiddleware  (when present)
+    RetryMiddleware         (when present)
+    TransactionMiddleware   (when present)
 ```
 
 This is intentional. Authorization happens before enqueue. Execution lifecycle events, resource locks, retries, and local command transactions belong to actual command execution, not to producer-side enqueue. On worker redispatch `ExecutionMode::SYNC` makes transport pass through, so those middleware execute normally around the handler.
