@@ -46,9 +46,7 @@ final class CommandWorker
         }
 
         foreach ($dispatchAttributes as $attribute => $_) {
-            if (!is_string($attribute)) {
-                throw new InvalidArgumentException('Worker dispatch attribute names must be strings.');
-            }
+            self::assertAttributeName($attribute, 'Worker dispatch');
         }
 
         $this->logger = $logger ?? new NullLogger();
@@ -119,9 +117,12 @@ final class CommandWorker
             $context = $this->contextSerializer->deserialize($envelope->contextPayload);
 
             foreach ($context as $attribute => $_) {
-                if (!is_string($attribute)) {
+                try {
+                    self::assertAttributeName($attribute, 'Transported operation context');
+                } catch (InvalidArgumentException $exception) {
                     throw new TransportException(
-                        'Transported operation context attribute names must be strings.',
+                        $exception->getMessage(),
+                        previous: $exception,
                     );
                 }
 
@@ -187,6 +188,24 @@ final class CommandWorker
         ]);
 
         return true;
+    }
+
+    private static function assertAttributeName(mixed $attribute, string $source): void
+    {
+        if (!is_string($attribute) || trim($attribute) === '') {
+            throw new InvalidArgumentException(sprintf(
+                '%s attribute names must be non-empty strings.',
+                $source,
+            ));
+        }
+
+        if (!is_string(array_key_first([$attribute => true]))) {
+            throw new InvalidArgumentException(sprintf(
+                '%s attribute name "%s" is converted by PHP to an integer array key.',
+                $source,
+                $attribute,
+            ));
+        }
     }
 
     /** @param array<string, mixed> $context */
