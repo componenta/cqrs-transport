@@ -15,6 +15,52 @@ use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Transport\Attribute\Async;
 
+function contextValidationWorker(array $dispatchAttributes = []): CommandWorker
+{
+    $bus = new class implements CommandBusInterface {
+        public function dispatch(object $command, array $attributes = []): OperationInterface
+        {
+            return Operation::create($command, $attributes);
+        }
+    };
+    $serializer = new readonly class implements CommandSerializerInterface {
+        public function serialize(object $command): string { return '{}'; }
+        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    };
+    $context = new readonly class implements OperationContextSerializerInterface {
+        public function serialize(OperationInterface $operation): string { return '{}'; }
+        public function deserialize(string $payload): array { return []; }
+    };
+    $transport = new readonly class implements TransportInterface {
+        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
+        public function get(): ?Envelope { return null; }
+        public function ack(Envelope $envelope): void {}
+        public function reject(Envelope $envelope): void {}
+    };
+    $commands = new readonly class implements CqrsMapProviderInterface {
+        public function map(): CqrsMap { return CqrsMap::empty(); }
+    };
+
+    return new CommandWorker(
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: $context,
+        transport: $transport,
+        transportName: 'default',
+        commands: $commands,
+        dispatchAttributes: $dispatchAttributes,
+    );
+}
+
+it('rejects invalid trusted worker dispatch attribute names at construction', function (array $attributes): void {
+    expect(fn() => contextValidationWorker($attributes))
+        ->toThrow(InvalidArgumentException::class, 'attribute');
+})->with([
+    'empty string' => [['' => true]],
+    'whitespace' => [['   ' => true]],
+    'integer key' => [[0 => true]],
+]);
+
 it('rejects non-string keys returned by a custom operation context serializer', function (): void {
     $envelope = new Envelope(
         operationId: 'operation-id',
