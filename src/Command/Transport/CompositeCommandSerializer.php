@@ -32,7 +32,7 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
             ) {
                 throw new InvalidArgumentException(sprintf(
                     'Command serializer at key "%s" must implement both %s and %s; got %s.',
-                    (string) $index,
+                    is_int($index) || is_string($index) ? (string) $index : get_debug_type($index),
                     CommandSerializerInterface::class,
                     CommandSerializerSupportInterface::class,
                     get_debug_type($serializer),
@@ -67,7 +67,7 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
     }
 
     /**
-     * @param object|class-string $command
+     * @param object|string $command
      * @return CommandSerializerInterface&CommandSerializerSupportInterface
      */
     private function serializerFor(object|string $command): CommandSerializerInterface&CommandSerializerSupportInterface
@@ -86,7 +86,7 @@ final readonly class CompositeCommandSerializer implements CommandSerializerInte
 
     /**
      * @param CommandSerializerInterface&CommandSerializerSupportInterface $serializer
-     * @param object|class-string $command
+     * @param object|string $command
      */
     private function supports(
         CommandSerializerInterface&CommandSerializerSupportInterface $serializer,

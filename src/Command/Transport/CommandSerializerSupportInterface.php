@@ -15,6 +15,6 @@ namespace Componenta\CQRS\Command\Transport;
  */
 interface CommandSerializerSupportInterface
 {
-    /** @param object|class-string $command Command instance or class name. */
+    /** @param object|string $command Command instance or class name. */
     public function supportsCommand(object|string $command): bool;
 }

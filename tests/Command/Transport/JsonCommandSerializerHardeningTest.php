@@ -201,7 +201,7 @@ it('rejects recursive arrays before unbounded recursion can exhaust the process'
     $serializer = new JsonCommandSerializer();
 
     expect(fn() => $serializer->serialize(new JsonNestedArrayCommand($recursive)))
-        ->toThrow(TransportException::class, 'maximum JSON nesting depth');
+        ->toThrow(TransportException::class, 'PHP reference');
 });
 
 it('rejects excessively deep arrays deterministically', function (): void {

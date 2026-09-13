@@ -13,29 +13,19 @@ use Componenta\CQRS\Command\Transport\ExecutionMode;
 use Componenta\CQRS\Command\Transport\JsonOperationContextSerializer;
 use Componenta\CQRS\Command\Transport\OperationContextSerializerInterface;
 use Componenta\CQRS\Command\Transport\TransportInterface;
-use Componenta\CQRS\Map\CommandMetadataDescriptor;
-use Componenta\CQRS\Map\CqrsMap;
-use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Transport\Attribute\Async;
+use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
 
-function workerTestMapForTransport(string $transport, string ...$commands): CqrsMapProviderInterface
+function workerTestMetadata(string $transport, string ...$commands): CommandMetadataProviderInterface
 {
-    $metadata = [];
-
-    foreach ($commands as $command) {
-        $metadata[$command][Async::class] = new CommandMetadataDescriptor(
-            Async::class,
-            ['transport' => $transport],
-        );
-    }
-
-    return new class ($metadata) implements CqrsMapProviderInterface {
-        /** @param array<string, array<class-string, CommandMetadataDescriptor>> $metadata */
-        public function __construct(private readonly array $metadata) {}
-
-        public function map(): CqrsMap
+    return new readonly class ($transport, $commands) implements CommandMetadataProviderInterface {
+        public function __construct(private string $transport, private array $commands)
         {
-            return new CqrsMap(commandMetadata: $this->metadata);
+        }
+        public function get(object|string $command, string $attribute): ?object
+        {
+            return in_array(is_object($command) ? $command::class : $command, $this->commands, true)
+                ? new Async($this->transport) : null;
         }
     };
 }
@@ -49,7 +39,7 @@ it('re-dispatches transported commands with restored operation context and worke
         'receipt-id',
         '{"tenant":"transport","trace":"abc"}',
     );
-    $bus = new class implements CommandBusInterface {
+    $bus = new class () implements CommandBusInterface {
         public object $command;
         /** @var array<string, mixed> */
         public array $attributes = [];
@@ -63,19 +53,43 @@ it('re-dispatches transported commands with restored operation context and worke
         }
     };
     $serializer = new class ($command) implements CommandSerializerInterface {
-        public function __construct(private readonly object $command) {}
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return $this->command; }
+        public function __construct(private readonly object $command)
+        {
+        }
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return $this->command;
+        }
     };
     $transport = new class ($envelope) implements TransportInterface {
         public int $acks = 0;
         public int $rejects = 0;
 
-        public function __construct(private ?Envelope $envelope) {}
-        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
-        public function get(): ?Envelope { $value = $this->envelope; $this->envelope = null; return $value; }
-        public function ack(Envelope $envelope): void { ++$this->acks; }
-        public function reject(Envelope $envelope): void { ++$this->rejects; }
+        public function __construct(private ?Envelope $envelope)
+        {
+        }
+        public function send(Envelope $envelope, int $delay = 0): Envelope
+        {
+            return $envelope;
+        }
+        public function get(): ?Envelope
+        {
+            $value = $this->envelope;
+            $this->envelope = null;
+            return $value;
+        }
+        public function ack(Envelope $envelope): void
+        {
+            ++$this->acks;
+        }
+        public function reject(Envelope $envelope): void
+        {
+            ++$this->rejects;
+        }
     };
 
     $worker = new CommandWorker(
@@ -84,7 +98,7 @@ it('re-dispatches transported commands with restored operation context and worke
         contextSerializer: new JsonOperationContextSerializer(['tenant', 'trace']),
         transport: $transport,
         transportName: 'default',
-        commands: workerTestMapForTransport('default', stdClass::class),
+        metadata: workerTestMetadata('default', stdClass::class),
         dispatchAttributes: ['tenant' => 'worker'],
     );
 
@@ -100,25 +114,52 @@ it('re-dispatches transported commands with restored operation context and worke
         ->and($transport->rejects)->toBe(0);
 });
 
-it('rejects a command routed to a different transport before hydration', function (): void {
+it('rejects a command routed to a different transport after deserialization', function (): void {
     $envelope = new Envelope('operation-id', stdClass::class, '{}', 'receipt-id');
-    $bus = new class implements CommandBusInterface {
+    $bus = new class () implements CommandBusInterface {
         public int $calls = 0;
-        public function dispatch(object $command, array $attributes = []): OperationInterface { ++$this->calls; return Operation::create($command, $attributes); }
+        public function dispatch(object $command, array $attributes = []): OperationInterface
+        {
+            ++$this->calls;
+            return Operation::create($command, $attributes);
+        }
     };
-    $serializer = new class implements CommandSerializerInterface {
+    $serializer = new class () implements CommandSerializerInterface {
         public int $calls = 0;
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { ++$this->calls; return new stdClass(); }
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            ++$this->calls;
+            return new stdClass();
+        }
     };
     $transport = new class ($envelope) implements TransportInterface {
         public int $acks = 0;
         public int $rejects = 0;
-        public function __construct(private ?Envelope $envelope) {}
-        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
-        public function get(): ?Envelope { $value = $this->envelope; $this->envelope = null; return $value; }
-        public function ack(Envelope $envelope): void { ++$this->acks; }
-        public function reject(Envelope $envelope): void { ++$this->rejects; }
+        public function __construct(private ?Envelope $envelope)
+        {
+        }
+        public function send(Envelope $envelope, int $delay = 0): Envelope
+        {
+            return $envelope;
+        }
+        public function get(): ?Envelope
+        {
+            $value = $this->envelope;
+            $this->envelope = null;
+            return $value;
+        }
+        public function ack(Envelope $envelope): void
+        {
+            ++$this->acks;
+        }
+        public function reject(Envelope $envelope): void
+        {
+            ++$this->rejects;
+        }
     };
 
     $worker = new CommandWorker(
@@ -127,11 +168,11 @@ it('rejects a command routed to a different transport before hydration', functio
         contextSerializer: new JsonOperationContextSerializer(),
         transport: $transport,
         transportName: 'emails',
-        commands: workerTestMapForTransport('payments', stdClass::class),
+        metadata: workerTestMetadata('payments', stdClass::class),
     );
 
     expect($worker->processOne())->toBeTrue()
-        ->and($serializer->calls)->toBe(0)
+        ->and($serializer->calls)->toBe(1)
         ->and($bus->calls)->toBe(0)
         ->and($transport->acks)->toBe(0)
         ->and($transport->rejects)->toBe(1);
@@ -139,7 +180,7 @@ it('rejects a command routed to a different transport before hydration', functio
 
 it('keeps sync execution mode authoritative over worker dispatch attributes', function (): void {
     $envelope = new Envelope('operation-id', stdClass::class, '{}', 'receipt-id');
-    $bus = new class implements CommandBusInterface {
+    $bus = new class () implements CommandBusInterface {
         /** @var array<string, mixed> */
         public array $attributes = [];
 
@@ -150,16 +191,36 @@ it('keeps sync execution mode authoritative over worker dispatch attributes', fu
             return Operation::create($command, $attributes);
         }
     };
-    $serializer = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
     $transport = new class ($envelope) implements TransportInterface {
-        public function __construct(private ?Envelope $envelope) {}
-        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
-        public function get(): ?Envelope { $value = $this->envelope; $this->envelope = null; return $value; }
-        public function ack(Envelope $envelope): void {}
-        public function reject(Envelope $envelope): void {}
+        public function __construct(private ?Envelope $envelope)
+        {
+        }
+        public function send(Envelope $envelope, int $delay = 0): Envelope
+        {
+            return $envelope;
+        }
+        public function get(): ?Envelope
+        {
+            $value = $this->envelope;
+            $this->envelope = null;
+            return $value;
+        }
+        public function ack(Envelope $envelope): void
+        {
+        }
+        public function reject(Envelope $envelope): void
+        {
+        }
     };
     $worker = new CommandWorker(
         bus: $bus,
@@ -167,7 +228,7 @@ it('keeps sync execution mode authoritative over worker dispatch attributes', fu
         contextSerializer: new JsonOperationContextSerializer(),
         transport: $transport,
         transportName: 'default',
-        commands: workerTestMapForTransport('default', stdClass::class),
+        metadata: workerTestMetadata('default', stdClass::class),
         dispatchAttributes: [
             'tenant' => 'main',
             TransportMiddleware::ATTR_EXECUTION_MODE => ExecutionMode::ASYNC,
@@ -185,26 +246,58 @@ it('keeps sync execution mode authoritative over worker dispatch attributes', fu
 
 it('rejects reserved attributes returned by a custom context serializer', function (): void {
     $envelope = new Envelope('operation-id', stdClass::class, '{}', 'receipt-id', '{}');
-    $bus = new class implements CommandBusInterface {
+    $bus = new class () implements CommandBusInterface {
         public int $calls = 0;
-        public function dispatch(object $command, array $attributes = []): OperationInterface { ++$this->calls; return Operation::create($command, $attributes); }
+        public function dispatch(object $command, array $attributes = []): OperationInterface
+        {
+            ++$this->calls;
+            return Operation::create($command, $attributes);
+        }
     };
-    $serializer = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
-    $context = new class implements OperationContextSerializerInterface {
-        public function serialize(OperationInterface $operation): string { return '{}'; }
-        public function deserialize(string $payload): array { return ['__execution_mode' => ExecutionMode::ASYNC]; }
+    $context = new class () implements OperationContextSerializerInterface {
+        public function serialize(OperationInterface $operation): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload): array
+        {
+            return ['__execution_mode' => ExecutionMode::ASYNC];
+        }
     };
     $transport = new class ($envelope) implements TransportInterface {
         public int $acks = 0;
         public int $rejects = 0;
-        public function __construct(private ?Envelope $envelope) {}
-        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
-        public function get(): ?Envelope { $value = $this->envelope; $this->envelope = null; return $value; }
-        public function ack(Envelope $envelope): void { ++$this->acks; }
-        public function reject(Envelope $envelope): void { ++$this->rejects; }
+        public function __construct(private ?Envelope $envelope)
+        {
+        }
+        public function send(Envelope $envelope, int $delay = 0): Envelope
+        {
+            return $envelope;
+        }
+        public function get(): ?Envelope
+        {
+            $value = $this->envelope;
+            $this->envelope = null;
+            return $value;
+        }
+        public function ack(Envelope $envelope): void
+        {
+            ++$this->acks;
+        }
+        public function reject(Envelope $envelope): void
+        {
+            ++$this->rejects;
+        }
     };
     $worker = new CommandWorker(
         bus: $bus,
@@ -212,7 +305,7 @@ it('rejects reserved attributes returned by a custom context serializer', functi
         contextSerializer: $context,
         transport: $transport,
         transportName: 'default',
-        commands: workerTestMapForTransport('default', stdClass::class),
+        metadata: workerTestMetadata('default', stdClass::class),
     );
 
     expect($worker->processOne())->toBeTrue()
@@ -222,26 +315,45 @@ it('rejects reserved attributes returned by a custom context serializer', functi
 });
 
 it('rejects empty worker transport names at construction', function (): void {
-    $transport = new class implements TransportInterface {
-        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
-        public function get(): ?Envelope { return null; }
-        public function ack(Envelope $envelope): void {}
-        public function reject(Envelope $envelope): void {}
+    $transport = new class () implements TransportInterface {
+        public function send(Envelope $envelope, int $delay = 0): Envelope
+        {
+            return $envelope;
+        }
+        public function get(): ?Envelope
+        {
+            return null;
+        }
+        public function ack(Envelope $envelope): void
+        {
+        }
+        public function reject(Envelope $envelope): void
+        {
+        }
     };
-    $bus = new class implements CommandBusInterface {
-        public function dispatch(object $command, array $attributes = []): OperationInterface { return Operation::create($command, $attributes); }
+    $bus = new class () implements CommandBusInterface {
+        public function dispatch(object $command, array $attributes = []): OperationInterface
+        {
+            return Operation::create($command, $attributes);
+        }
     };
-    $serializer = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
 
-    expect(fn() => new CommandWorker(
+    expect(fn () => new CommandWorker(
         bus: $bus,
         serializer: $serializer,
         contextSerializer: new JsonOperationContextSerializer(),
         transport: $transport,
         transportName: '   ',
-        commands: workerTestMapForTransport('default', stdClass::class),
+        metadata: workerTestMetadata('default', stdClass::class),
     ))->toThrow(InvalidArgumentException::class, 'transport name');
 });

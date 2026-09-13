@@ -19,22 +19,19 @@ use Componenta\CQRS\Transport\Attribute\Async;
 function transportTestMetadata(?Async $async): CommandMetadataProviderInterface
 {
     return new class ($async) implements CommandMetadataProviderInterface {
-        public function __construct(private readonly ?Async $async) {}
+        public function __construct(private readonly ?Async $async)
+        {
+        }
 
         public function get(object|string $command, string $attribute): ?object
         {
             return $attribute === Async::class ? $this->async : null;
         }
-
-        public function isKnown(object|string $command): bool
-        {
-            return true;
-        }
     };
 }
 
 it('routes asynchronous commands and serializes allowlisted operation context', function (): void {
-    $transport = new class implements TransportInterface {
+    $transport = new class () implements TransportInterface {
         public ?Envelope $sent = null;
         public int $delay = -1;
 
@@ -46,15 +43,24 @@ it('routes asynchronous commands and serializes allowlisted operation context', 
             return $envelope;
         }
 
-        public function get(): ?Envelope { return null; }
-        public function ack(Envelope $envelope): void {}
-        public function reject(Envelope $envelope): void {}
+        public function get(): ?Envelope
+        {
+            return null;
+        }
+        public function ack(Envelope $envelope): void
+        {
+        }
+        public function reject(Envelope $envelope): void
+        {
+        }
     };
 
     $registry = new class ($transport) implements TransportRegistryInterface {
         public string $requested = '';
 
-        public function __construct(private readonly TransportInterface $transport) {}
+        public function __construct(private readonly TransportInterface $transport)
+        {
+        }
 
         public function get(string $name): TransportInterface
         {
@@ -69,12 +75,18 @@ it('routes asynchronous commands and serializes allowlisted operation context', 
         }
     };
 
-    $serializer = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return 'payload'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return 'payload';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
 
-    $handler = new class implements OperationHandlerInterface {
+    $handler = new class () implements OperationHandlerInterface {
         public int $calls = 0;
 
         public function handle(OperationInterface $operation): OperationInterface
@@ -109,20 +121,23 @@ it('routes asynchronous commands and serializes allowlisted operation context', 
 it('rejects invalid asynchronous transport declarations', function (Closure $create): void {
     expect($create)->toThrow(InvalidArgumentException::class);
 })->with([
-    'empty transport' => [fn() => new Async('  ')],
-    'negative delay' => [fn() => new Async(delay: -1)],
+    'empty transport' => [fn () => new Async('  ')],
+    'negative delay' => [fn () => new Async(delay: -1)],
 ]);
 
 it('adds synchronous execution mode only after downstream returns', function (): void {
-    $registry = new class implements TransportRegistryInterface {
+    $registry = new class () implements TransportRegistryInterface {
         public function get(string $name): TransportInterface
         {
             throw new RuntimeException('A synchronous command must not resolve a transport.');
         }
 
-        public function has(string $name): bool { return false; }
+        public function has(string $name): bool
+        {
+            return false;
+        }
     };
-    $serializer = new class implements CommandSerializerInterface {
+    $serializer = new class () implements CommandSerializerInterface {
         public function serialize(object $command): string
         {
             throw new RuntimeException('A synchronous command must not be serialized.');
@@ -133,7 +148,7 @@ it('adds synchronous execution mode only after downstream returns', function ():
             throw new RuntimeException('Not used.');
         }
     };
-    $handler = new class implements OperationHandlerInterface {
+    $handler = new class () implements OperationHandlerInterface {
         public mixed $observedMode = 'not-called';
 
         public function handle(OperationInterface $operation): OperationInterface
@@ -162,30 +177,54 @@ it('adds synchronous execution mode only after downstream returns', function ():
 });
 
 it('turns ambiguous producer send failures into non-retryable transport failures', function (): void {
-    $transport = new class implements TransportInterface {
+    $transport = new class () implements TransportInterface {
         public function send(Envelope $envelope, int $delay = 0): Envelope
         {
             throw new RuntimeException('connection lost after write');
         }
 
-        public function get(): ?Envelope { return null; }
-        public function ack(Envelope $envelope): void {}
-        public function reject(Envelope $envelope): void {}
+        public function get(): ?Envelope
+        {
+            return null;
+        }
+        public function ack(Envelope $envelope): void
+        {
+        }
+        public function reject(Envelope $envelope): void
+        {
+        }
     };
     $registry = new class ($transport) implements TransportRegistryInterface {
-        public function __construct(private readonly TransportInterface $transport) {}
-        public function get(string $name): TransportInterface { return $this->transport; }
-        public function has(string $name): bool { return true; }
+        public function __construct(private readonly TransportInterface $transport)
+        {
+        }
+        public function get(string $name): TransportInterface
+        {
+            return $this->transport;
+        }
+        public function has(string $name): bool
+        {
+            return true;
+        }
     };
-    $serializer = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
-    $handler = new class implements OperationHandlerInterface {
-        public function handle(OperationInterface $operation): OperationInterface { return $operation; }
+    $handler = new class () implements OperationHandlerInterface {
+        public function handle(OperationInterface $operation): OperationInterface
+        {
+            return $operation;
+        }
     };
 
-    expect(fn() => (new TransportMiddleware(
+    expect(fn () => (new TransportMiddleware(
         $registry,
         $serializer,
         transportTestMetadata(new Async()),

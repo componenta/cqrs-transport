@@ -6,7 +6,8 @@ namespace Componenta\CQRS\Command\Transport;
 
 use Componenta\CQRS\Command\CommandBusInterface;
 use Componenta\CQRS\Command\Middleware\TransportMiddleware;
-use Componenta\CQRS\Map\CqrsMapProviderInterface;
+use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
+use Componenta\CQRS\Command\Metadata\ReflectionCommandMetadataProvider;
 use Componenta\CQRS\Transport\Attribute\Async;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
@@ -25,10 +26,6 @@ final class CommandWorker
     private readonly array $dispatchAttributes;
 
     /**
-     * The worker is fail-closed: envelope-selected command classes must be
-     * explicitly declared async for this exact transport name in the active
-     * CQRS map before class loading or deserialization is attempted.
-     *
      * @param array<string, mixed> $dispatchAttributes Trusted attributes added by the worker.
      */
     public function __construct(
@@ -37,7 +34,7 @@ final class CommandWorker
         private readonly OperationContextSerializerInterface $contextSerializer,
         private readonly TransportInterface $transport,
         private readonly string $transportName,
-        private readonly CqrsMapProviderInterface $commands,
+        private readonly CommandMetadataProviderInterface $metadata = new ReflectionCommandMetadataProvider(),
         ?LoggerInterface $logger = null,
         array $dispatchAttributes = [],
     ) {
@@ -63,43 +60,6 @@ final class CommandWorker
         }
 
         try {
-            $descriptor = $this->commands->map()->commandMetadata(
-                $envelope->commandClass,
-                Async::class,
-            );
-
-            if ($descriptor === null) {
-                throw new TransportException(sprintf(
-                    'Transported command class "%s" is not declared async in the configured CQRS command map.',
-                    $envelope->commandClass,
-                ));
-            }
-
-            try {
-                $async = new Async(...$descriptor->arguments);
-            } catch (Throwable $exception) {
-                throw new TransportException(sprintf(
-                    'Invalid Async metadata for transported command class "%s": %s',
-                    $envelope->commandClass,
-                    $exception->getMessage(),
-                ), previous: $exception);
-            }
-
-            if ($async->transport !== $this->transportName) {
-                throw new TransportException(sprintf(
-                    'Transported command class "%s" is declared for transport "%s", not worker transport "%s".',
-                    $envelope->commandClass,
-                    $async->transport,
-                    $this->transportName,
-                ));
-            }
-
-            if (!class_exists($envelope->commandClass)) {
-                throw new TransportException(
-                    "Transported command class '{$envelope->commandClass}' does not exist.",
-                );
-            }
-
             $commandClass = $envelope->commandClass;
             $command = $this->serializer->deserialize(
                 $envelope->payload,
@@ -111,6 +71,23 @@ final class CommandWorker
                     'Deserializer returned %s for transported command class %s.',
                     get_debug_type($command),
                     $commandClass,
+                ));
+            }
+
+            $async = $this->metadata->get($command, Async::class);
+            if ($async === null) {
+                throw new TransportException(sprintf(
+                    'Transported command class "%s" is not declared async.',
+                    $commandClass,
+                ));
+            }
+
+            if ($async->transport !== $this->transportName) {
+                throw new TransportException(sprintf(
+                    'Transported command class "%s" is declared for transport "%s", not worker transport "%s".',
+                    $envelope->commandClass,
+                    $async->transport,
+                    $this->transportName,
                 ));
             }
 

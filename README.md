@@ -10,7 +10,7 @@ composer require componenta/cqrs-transport
 
 Register `Componenta\CQRS\Transport\ConfigProvider` after the core CQRS provider. The package does not choose a concrete transport or command serializer for the application: bind `TransportRegistryInterface` and `CommandSerializerInterface`, then register the named transports used by the application.
 
-The provider registers `TransportMiddleware` as a service and contributes `Async` to compiled command metadata, but it does **not** insert transport into the command pipeline. Middleware composition and ordering belong to the application. Add it explicitly where async routing is required:
+The provider registers `TransportMiddleware` as a service. The middleware reads `Async` through `CommandMetadataProviderInterface`. The application chooses middleware composition and ordering. Add it explicitly where async routing is required:
 
 ```php
 use Componenta\CQRS\Command\Middleware\TransportMiddleware;
@@ -40,7 +40,9 @@ interface CommandSerializerInterface
 
 Serializers that participate in automatic selection additionally implement `CommandSerializerSupportInterface`. `CompositeCommandSerializer` tries support predicates in order; once a serializer claims a command class, any serialization or validation failure from that serializer is final. The composite validates every configured serializer at construction time so an invalid iterable fails as configuration rather than later during dispatch.
 
-`JsonCommandSerializer` accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and recursively JSON-safe arrays. It rejects executable callable/Closure capabilities, arbitrary objects, private or inherited private state, hooked/virtual properties, dynamic properties, variadic/by-reference constructor parameters, unknown fields, excessive nesting, and reconstructed commands whose constructor changes serialized state.
+`JsonCommandSerializer` checks constructor accessibility and the compatibility of stored fields with constructor parameter types before sending, without invoking the constructor.
+
+`JsonCommandSerializer` accepts public stored constructor-backed state containing null, booleans, integers, finite floats, strings, and recursively JSON-safe arrays. It rejects executable callable/Closure capabilities, arbitrary objects, private or inherited private state, internal PHP classes or ancestors other than `stdClass`, hooked/virtual properties, dynamic properties, PHP references in properties or array elements, variadic/by-reference constructor parameters, unknown fields, excessive nesting, and reconstructed commands whose constructor changes serialized state.
 
 Incoming shape and type are validated before command construction. JSON integer and float remain distinct wire types; integer tokens outside the PHP integer range are rejected rather than silently coerced to float. The serializer also verifies its own encoded payload so lossy numeric conversion fails closed.
 
@@ -80,15 +82,17 @@ $contextSerializer = new JsonOperationContextSerializer([
 ]);
 ```
 
-Only listed attributes cross the async boundary. Attribute names obey the same string-key contract as `Operation`; numeric-string names that PHP would convert to integer array keys are rejected. Values must be JSON-safe scalars/arrays; arbitrary objects and non-finite floats are rejected. The serializer preserves exact integer/float wire types and signed zero, rejects integer tokens outside the PHP integer range, and fails closed when PHP JSON precision would alter context data.
+Arrays must preserve their internal pointer and next integer append index through JSON. JSON restores nonempty arrays with the pointer at the first element; other pointer positions are rejected, including the past-end state. This also applies to nested arrays. For example, deleting the last numeric element can leave hidden append state that JSON cannot represent. Both command and context serializers reject this state before sending; command reconstruction is checked as well. Validation uses copies and leaves the original arrays unchanged. Use a custom serializer when this state is meaningful, or explicitly normalize arrays in application code when that is the intended behaviour.
+
+Only listed attributes cross the async boundary. Attribute names obey the same string-key contract as `Operation`; numeric-string names that PHP would convert to integer array keys are rejected. Values must be JSON-safe scalars/arrays; arbitrary objects, non-finite floats, and PHP references in transported attributes or nested arrays are rejected. The serializer preserves exact integer/float wire types and signed zero, rejects integer tokens outside the PHP integer range, and fails closed when PHP JSON precision would alter context data.
 
 Attribute names beginning with `__` are reserved for trusted runtime state and cannot be allowlisted. The worker independently rejects reserved attributes even when a custom context serializer is used. The default serializer has an empty allowlist, so application attributes remain process-local unless deliberately declared transportable.
 
 ## Worker hydration and queue boundary
 
-`CommandWorker` is fail-closed. Before `class_exists()` and before serializer hydration, the envelope-selected class must have compiled `Async` metadata in the active `CqrsMapProviderInterface` map **for the exact logical transport processed by this worker**.
+`CommandWorker` asks the configured serializer to restore the envelope's requested command type. The serializer owns supported formats, supported command state and deserialization errors. The worker then verifies the returned object's type and reads `#[Async]` through `CommandMetadataProviderInterface`.
 
-Being merely present in `knownCommands`, listener metadata, unrelated command metadata, or `Async` metadata for another transport is not sufficient.
+A command is dispatched only when its attribute names the worker's transport. A missing attribute or a different transport rejects the delivery after deserialization. Handler-map membership is unrelated to this decision.
 
 ```php
 $worker = new CommandWorker(
@@ -97,17 +101,16 @@ $worker = new CommandWorker(
     contextSerializer: $operationContextSerializer,
     transport: $transport,
     transportName: 'payments',
-    commands: $cqrsMapProvider,
 );
 ```
 
-For a command declared as `#[Async('payments')]`, a worker bound to `emails` rejects the envelope before command class loading or deserialization even if the message physically appears in that queue.
+The default metadata provider is `ReflectionCommandMetadataProvider`; a custom provider can be passed as `metadata:`. The producer middleware reads the same attribute contract. No registration of metadata classes or prepared handler map is needed.
 
-There is no unrestricted `unsafe()` construction path in v5. A generic reflection metadata provider is not a command-class allowlist. The standard CQRS v4 metadata provider is strictly map-backed, so producer routing and worker acceptance use the same compiled metadata contract.
+An error restoring the command, checking its type or transport, restoring context, or dispatching prevents acknowledgement and follows the worker's rejection policy. A serialization failure on the producer prevents sending and is propagated to its caller.
 
-The metadata boundary restricts which command types may be hydrated; it does not authenticate payload fields. If less-trusted actors can modify queued messages, integrity protection must cover the complete transport message at the transport/storage boundary.
+The serializer is the boundary for constructing supported command objects. The worker's subsequent transport check does not authenticate payload fields or undo constructor effects. Integrity protection for queued messages belongs to the transport/storage boundary.
 
-After successful deserialization the worker merges attributes with this precedence:
+After successful deserialization and transport validation the worker merges attributes with this precedence:
 
 ```text
 transported allowlisted context

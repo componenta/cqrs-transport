@@ -47,10 +47,6 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         $reflection = new ReflectionClass($commandClass);
-        if (!$reflection->isInstantiable()) {
-            throw new TransportException("Command class '{$commandClass}' must be instantiable.");
-        }
-
         $parameters = $this->constructorParameters($reflection);
         $properties = $this->assertSupportedProperties($reflection, $parameters);
 
@@ -143,15 +139,14 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                 return true;
             }
 
-            if (is_array($value) !== is_array($aware)) {
-                return true;
-            }
-
             if (!is_array($value)) {
+                if (is_array($aware)) {
+                    return true;
+                }
                 continue;
             }
 
-            if (array_keys($value) !== array_keys($aware)) {
+            if (!is_array($aware) || array_keys($value) !== array_keys($aware)) {
                 return true;
             }
 
@@ -199,6 +194,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         $parameters = $this->constructorParameters($reflection);
         $properties = $this->assertSupportedProperties($reflection, $parameters);
         $this->assertNoDynamicProperties($command, $properties, $reflection->getName());
+        $this->assertNoReferencedProperties($command);
         $data = [];
 
         foreach ($properties as $name => $property) {
@@ -216,6 +212,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
             }
 
             $this->assertJsonValue($value, $name);
+            $this->assertParameterType($value, $parameters[$name], $reflection->getName());
             $data[$name] = $value;
         }
 
@@ -228,6 +225,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
      */
     private function constructorParameters(ReflectionClass $reflection): array
     {
+        if (!$reflection->isInstantiable()) {
+            throw new TransportException("Command class '{$reflection->getName()}' must be instantiable.");
+        }
+
         $constructor = $reflection->getConstructor();
         if ($constructor === null) {
             return [];
@@ -298,6 +299,16 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
      */
     private function assertSupportedProperties(ReflectionClass $reflection, array $parameters): array
     {
+        for ($class = $reflection; $class !== false; $class = $class->getParentClass()) {
+            if ($class->isInternal() && $class->getName() !== \stdClass::class) {
+                throw new TransportException(sprintf(
+                    'Default JSON serialization does not support internal class "%s" on %s; configure a custom serializer.',
+                    $class->getName(),
+                    $reflection->getName(),
+                ));
+            }
+        }
+
         $this->assertNoInheritedPrivateProperties($reflection);
         $properties = [];
 
@@ -394,6 +405,19 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         ));
     }
 
+    private function assertNoReferencedProperties(object $command): void
+    {
+        $values = get_object_vars($command);
+        foreach ($values as $name => $_) {
+            if (\ReflectionReference::fromArrayElement($values, $name) !== null) {
+                throw new TransportException(sprintf(
+                    'Command field "%s" contains a PHP reference; configure a custom serializer.',
+                    $name,
+                ));
+            }
+        }
+    }
+
     private function assertJsonValue(mixed $value, string $path, int $depth = 0): void
     {
         if ($depth > self::MAX_NESTING_DEPTH) {
@@ -418,6 +442,13 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
 
         if (is_array($value)) {
             foreach ($value as $key => $item) {
+                if (\ReflectionReference::fromArrayElement($value, $key) !== null) {
+                    throw new TransportException(sprintf(
+                        'Command field "%s.%s" contains a PHP reference; configure a custom serializer.',
+                        $path,
+                        $key,
+                    ));
+                }
                 $this->assertJsonValue($item, $path . '.' . $key, $depth + 1);
             }
 
@@ -441,6 +472,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         array $properties,
         string $commandClass,
     ): void {
+        $this->assertNoReferencedProperties($command);
         foreach ($expectedState as $name => $expected) {
             $property = $properties[$name];
 
@@ -459,6 +491,10 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                     sprintf('Cannot read restored command field "%s": %s', $name, $exception->getMessage()),
                     previous: $exception,
                 );
+            }
+
+            if (is_array($actual)) {
+                $this->assertJsonValue($actual, $name);
             }
 
             if (!$this->valuesEquivalent($expected, $actual)) {
@@ -484,7 +520,7 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
         }
 
         if (is_array($expected) && is_array($actual)) {
-            if (array_keys($expected) !== array_keys($actual)) {
+            if (array_keys($expected) !== array_keys($actual) || key($expected) !== key($actual)) {
                 return false;
             }
 
@@ -494,7 +530,15 @@ final readonly class JsonCommandSerializer implements CommandSerializerInterface
                 }
             }
 
-            return true;
+            // Equal keys and values do not imply the same next integer index.
+            // Probe copies; an occupied PHP_INT_MAX makes appending impossible
+            // for both arrays, so no probe is needed in that case.
+            if (array_key_exists(PHP_INT_MAX, $expected)) {
+                return true;
+            }
+            $expected[] = null;
+            $actual[] = null;
+            return array_key_last($expected) === array_key_last($actual);
         }
 
         return $expected === $actual;

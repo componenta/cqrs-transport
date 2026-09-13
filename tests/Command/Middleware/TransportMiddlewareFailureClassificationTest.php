@@ -16,24 +16,39 @@ use Componenta\CQRS\Transport\Attribute\Async;
 it('does not classify transport lookup failures as ambiguous send failures', function (): void {
     $lookupFailure = new RuntimeException('transport is not configured');
     $registry = new class ($lookupFailure) implements TransportRegistryInterface {
-        public function __construct(private readonly Throwable $failure) {}
-        public function get(string $name): TransportInterface { throw $this->failure; }
-        public function has(string $name): bool { return false; }
+        public function __construct(private readonly Throwable $failure)
+        {
+        }
+        public function get(string $name): TransportInterface
+        {
+            throw $this->failure;
+        }
+        public function has(string $name): bool
+        {
+            return false;
+        }
     };
-    $serializer = new class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
-    $metadata = new class implements CommandMetadataProviderInterface {
+    $metadata = new class () implements CommandMetadataProviderInterface {
         public function get(object|string $command, string $attribute): ?object
         {
             return $attribute === Async::class ? new Async('missing') : null;
         }
-
-        public function isKnown(object|string $command): bool { return true; }
     };
-    $handler = new class implements OperationHandlerInterface {
-        public function handle(OperationInterface $operation): OperationInterface { return $operation; }
+    $handler = new class () implements OperationHandlerInterface {
+        public function handle(OperationInterface $operation): OperationInterface
+        {
+            return $operation;
+        }
     };
 
     try {

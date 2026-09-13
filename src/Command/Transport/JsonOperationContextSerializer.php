@@ -68,13 +68,21 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
     public function serialize(OperationInterface $operation): string
     {
         $context = [];
+        $attributes = $this->allowedAttributes === [] ? [] : $operation->attributes;
 
         foreach ($this->allowedAttributes as $attribute => $_) {
-            if (!array_key_exists($attribute, $operation->attributes)) {
+            if (!array_key_exists($attribute, $attributes)) {
                 continue;
             }
 
-            $value = $operation->attributes[$attribute];
+            if (\ReflectionReference::fromArrayElement($attributes, $attribute) !== null) {
+                throw new OperationContextSerializationException(sprintf(
+                    'Operation transport context attribute "%s" contains a PHP reference; configure a custom serializer.',
+                    $attribute,
+                ));
+            }
+
+            $value = $attributes[$attribute];
             self::assertJsonValue($value, $attribute);
             $context[$attribute] = $value;
         }
@@ -184,15 +192,14 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
                 return true;
             }
 
-            if (is_array($value) !== is_array($aware)) {
-                return true;
-            }
-
             if (!is_array($value)) {
+                if (is_array($aware)) {
+                    return true;
+                }
                 continue;
             }
 
-            if (array_keys($value) !== array_keys($aware)) {
+            if (!is_array($aware) || array_keys($value) !== array_keys($aware)) {
                 return true;
             }
 
@@ -237,6 +244,13 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
         }
 
         foreach ($value as $key => $nested) {
+            if (\ReflectionReference::fromArrayElement($value, $key) !== null) {
+                throw new OperationContextSerializationException(sprintf(
+                    'Operation transport context attribute "%s[%s]" contains a PHP reference; configure a custom serializer.',
+                    $path,
+                    $key,
+                ));
+            }
             self::assertJsonValue(
                 $nested,
                 sprintf('%s[%s]', $path, (string) $key),
@@ -258,7 +272,7 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
         }
 
         if (is_array($expected) && is_array($actual)) {
-            if (array_keys($expected) !== array_keys($actual)) {
+            if (array_keys($expected) !== array_keys($actual) || key($expected) !== key($actual)) {
                 return false;
             }
 
@@ -268,7 +282,15 @@ final readonly class JsonOperationContextSerializer implements OperationContextS
                 }
             }
 
-            return true;
+            // Equal keys and values do not imply the same next integer index.
+            // Probe copies; an occupied PHP_INT_MAX makes appending impossible
+            // for both arrays, so no probe is needed in that case.
+            if (array_key_exists(PHP_INT_MAX, $expected)) {
+                return true;
+            }
+            $expected[] = null;
+            $actual[] = null;
+            return array_key_last($expected) === array_key_last($actual);
         }
 
         return $expected === $actual;

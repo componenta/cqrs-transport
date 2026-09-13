@@ -10,35 +10,58 @@ use Componenta\CQRS\Command\Transport\CommandWorker;
 use Componenta\CQRS\Command\Transport\Envelope;
 use Componenta\CQRS\Command\Transport\OperationContextSerializerInterface;
 use Componenta\CQRS\Command\Transport\TransportInterface;
-use Componenta\CQRS\Map\CommandMetadataDescriptor;
-use Componenta\CQRS\Map\CqrsMap;
-use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Transport\Attribute\Async;
+use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
 
 function contextValidationWorker(array $dispatchAttributes = []): CommandWorker
 {
-    $bus = new class implements CommandBusInterface {
+    $bus = new class () implements CommandBusInterface {
         public function dispatch(object $command, array $attributes = []): OperationInterface
         {
             return Operation::create($command, $attributes);
         }
     };
-    $serializer = new readonly class implements CommandSerializerInterface {
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    $serializer = new readonly class () implements CommandSerializerInterface {
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            return new stdClass();
+        }
     };
-    $context = new readonly class implements OperationContextSerializerInterface {
-        public function serialize(OperationInterface $operation): string { return '{}'; }
-        public function deserialize(string $payload): array { return []; }
+    $context = new readonly class () implements OperationContextSerializerInterface {
+        public function serialize(OperationInterface $operation): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload): array
+        {
+            return [];
+        }
     };
-    $transport = new readonly class implements TransportInterface {
-        public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
-        public function get(): ?Envelope { return null; }
-        public function ack(Envelope $envelope): void {}
-        public function reject(Envelope $envelope): void {}
+    $transport = new readonly class () implements TransportInterface {
+        public function send(Envelope $envelope, int $delay = 0): Envelope
+        {
+            return $envelope;
+        }
+        public function get(): ?Envelope
+        {
+            return null;
+        }
+        public function ack(Envelope $envelope): void
+        {
+        }
+        public function reject(Envelope $envelope): void
+        {
+        }
     };
-    $commands = new readonly class implements CqrsMapProviderInterface {
-        public function map(): CqrsMap { return CqrsMap::empty(); }
+    $commands = new readonly class () implements CommandMetadataProviderInterface {
+        public function get(object|string $command, string $attribute): ?object
+        {
+            return new Async();
+        }
     };
 
     return new CommandWorker(
@@ -47,13 +70,13 @@ function contextValidationWorker(array $dispatchAttributes = []): CommandWorker
         contextSerializer: $context,
         transport: $transport,
         transportName: 'default',
-        commands: $commands,
+        metadata: $commands,
         dispatchAttributes: $dispatchAttributes,
     );
 }
 
 it('rejects invalid trusted worker dispatch attribute names at construction', function (array $attributes): void {
-    expect(fn() => contextValidationWorker($attributes))
+    expect(fn () => contextValidationWorker($attributes))
         ->toThrow(InvalidArgumentException::class, 'attribute');
 })->with([
     'empty string' => [['' => true]],
@@ -69,7 +92,7 @@ it('rejects non-string keys returned by a custom operation context serializer', 
         receiptHandle: 'receipt-id',
     );
 
-    $bus = new class implements CommandBusInterface {
+    $bus = new class () implements CommandBusInterface {
         public int $calls = 0;
 
         public function dispatch(object $command, array $attributes = []): OperationInterface
@@ -80,7 +103,7 @@ it('rejects non-string keys returned by a custom operation context serializer', 
         }
     };
 
-    $serializer = new readonly class implements CommandSerializerInterface {
+    $serializer = new readonly class () implements CommandSerializerInterface {
         public function serialize(object $command): string
         {
             return '{}';
@@ -92,7 +115,7 @@ it('rejects non-string keys returned by a custom operation context serializer', 
         }
     };
 
-    $context = new readonly class implements OperationContextSerializerInterface {
+    $context = new readonly class () implements OperationContextSerializerInterface {
         public function serialize(OperationInterface $operation): string
         {
             return '{}';
@@ -108,7 +131,9 @@ it('rejects non-string keys returned by a custom operation context serializer', 
         public int $acks = 0;
         public int $rejects = 0;
 
-        public function __construct(private ?Envelope $envelope) {}
+        public function __construct(private ?Envelope $envelope)
+        {
+        }
 
         public function send(Envelope $envelope, int $delay = 0): Envelope
         {
@@ -134,17 +159,10 @@ it('rejects non-string keys returned by a custom operation context serializer', 
         }
     };
 
-    $commands = new readonly class implements CqrsMapProviderInterface {
-        public function map(): CqrsMap
+    $commands = new readonly class () implements CommandMetadataProviderInterface {
+        public function get(object|string $command, string $attribute): ?object
         {
-            return new CqrsMap(commandMetadata: [
-                stdClass::class => [
-                    Async::class => new CommandMetadataDescriptor(
-                        Async::class,
-                        [],
-                    ),
-                ],
-            ]);
+            return new Async();
         }
     };
 
@@ -154,7 +172,7 @@ it('rejects non-string keys returned by a custom operation context serializer', 
         contextSerializer: $context,
         transport: $transport,
         transportName: 'default',
-        commands: $commands,
+        metadata: $commands,
     );
 
     expect($worker->processOne())->toBeTrue()

@@ -12,14 +12,14 @@ use Componenta\CQRS\Command\Transport\JsonOperationContextSerializer;
 use Componenta\CQRS\Command\Transport\TransportDispositionException;
 use Componenta\CQRS\Command\Transport\TransportException;
 use Componenta\CQRS\Command\Transport\TransportInterface;
-use Componenta\CQRS\Map\CommandMetadataDescriptor;
-use Componenta\CQRS\Map\CqrsMap;
-use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Transport\Attribute\Async;
+use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
 
 final class WorkerDispositionTestBus implements CommandBusInterface
 {
-    public function __construct(private readonly ?Throwable $failure = null) {}
+    public function __construct(private readonly ?Throwable $failure = null)
+    {
+    }
 
     public function dispatch(object $command, array $attributes = []): OperationInterface
     {
@@ -33,8 +33,14 @@ final class WorkerDispositionTestBus implements CommandBusInterface
 
 final readonly class WorkerDispositionTestSerializer implements CommandSerializerInterface
 {
-    public function serialize(object $command): string { return '{}'; }
-    public function deserialize(string $payload, string $commandClass): object { return new stdClass(); }
+    public function serialize(object $command): string
+    {
+        return '{}';
+    }
+    public function deserialize(string $payload, string $commandClass): object
+    {
+        return new stdClass();
+    }
 }
 
 final class WorkerDispositionTestTransport implements TransportInterface
@@ -49,7 +55,10 @@ final class WorkerDispositionTestTransport implements TransportInterface
     ) {
     }
 
-    public function send(Envelope $envelope, int $delay = 0): Envelope { return $envelope; }
+    public function send(Envelope $envelope, int $delay = 0): Envelope
+    {
+        return $envelope;
+    }
 
     public function get(): ?Envelope
     {
@@ -83,36 +92,16 @@ function workerDispositionEnvelope(string $commandClass = stdClass::class): Enve
     return new Envelope('operation-id', $commandClass, '{}', 'receipt-id');
 }
 
-function workerDispositionMap(string ...$commands): CqrsMapProviderInterface
+function workerDispositionMetadata(string ...$commands): CommandMetadataProviderInterface
 {
-    $metadata = [];
-
-    foreach ($commands as $command) {
-        $metadata[$command][Async::class] = new CommandMetadataDescriptor(
-            Async::class,
-            [],
-        );
-    }
-
-    return new class ($metadata) implements CqrsMapProviderInterface {
-        /** @param array<string, array<class-string, CommandMetadataDescriptor>> $metadata */
-        public function __construct(private readonly array $metadata) {}
-
-        public function map(): CqrsMap
+    return new readonly class ($commands) implements CommandMetadataProviderInterface {
+        public function __construct(private array $commands)
         {
-            return new CqrsMap(commandMetadata: $this->metadata);
         }
-    };
-}
-
-function workerDispositionKnownOnlyMap(string $command): CqrsMapProviderInterface
-{
-    return new class ($command) implements CqrsMapProviderInterface {
-        public function __construct(private readonly string $command) {}
-
-        public function map(): CqrsMap
+        public function get(object|string $command, string $attribute): ?object
         {
-            return new CqrsMap(knownCommands: [$this->command => true]);
+            return in_array(is_object($command) ? $command::class : $command, $this->commands, true)
+                ? new Async() : null;
         }
     };
 }
@@ -121,7 +110,7 @@ function workerDispositionWorker(
     WorkerDispositionTestBus $bus,
     CommandSerializerInterface $serializer,
     WorkerDispositionTestTransport $transport,
-    ?CqrsMapProviderInterface $commands = null,
+    ?CommandMetadataProviderInterface $commands = null,
 ): CommandWorker {
     return new CommandWorker(
         bus: $bus,
@@ -129,7 +118,7 @@ function workerDispositionWorker(
         contextSerializer: new JsonOperationContextSerializer(),
         transport: $transport,
         transportName: 'default',
-        commands: $commands ?? workerDispositionMap(stdClass::class),
+        metadata: $commands ?? workerDispositionMetadata(stdClass::class),
     );
 }
 
@@ -144,7 +133,7 @@ it('does not reject a successfully handled command when acknowledgement fails', 
         $transport,
     );
 
-    expect(fn() => $worker->processOne())
+    expect(fn () => $worker->processOne())
         ->toThrow(TransportException::class, 'acknowledgement failed')
         ->and($transport->acks)->toBe(1)
         ->and($transport->rejects)->toBe(0);
@@ -182,7 +171,7 @@ it('rejects an envelope when a custom deserializer returns the wrong command typ
         new WorkerDispositionTestBus(),
         new WorkerDispositionTestSerializer(),
         $transport,
-        workerDispositionMap(DateTimeImmutable::class),
+        workerDispositionMetadata(DateTimeImmutable::class),
     );
 
     expect($worker->processOne())->toBeTrue()
@@ -190,42 +179,29 @@ it('rejects an envelope when a custom deserializer returns the wrong command typ
         ->and($transport->rejects)->toBe(1);
 });
 
-it('rejects a command without async metadata before deserialization even when CQRS knows it', function (): void {
+it('rejects a command without async metadata after deserialization', function (): void {
     $transport = new WorkerDispositionTestTransport(workerDispositionEnvelope());
-    $serializer = new class implements CommandSerializerInterface {
+    $serializer = new class () implements CommandSerializerInterface {
         public int $calls = 0;
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { ++$this->calls; return new stdClass(); }
+        public function serialize(object $command): string
+        {
+            return '{}';
+        }
+        public function deserialize(string $payload, string $commandClass): object
+        {
+            ++$this->calls;
+            return new stdClass();
+        }
     };
     $worker = workerDispositionWorker(
         new WorkerDispositionTestBus(),
         $serializer,
         $transport,
-        workerDispositionKnownOnlyMap(stdClass::class),
+        workerDispositionMetadata(),
     );
 
     expect($worker->processOne())->toBeTrue()
-        ->and($serializer->calls)->toBe(0)
-        ->and($transport->acks)->toBe(0)
-        ->and($transport->rejects)->toBe(1);
-});
-
-it('rejects a command outside the configured map before deserialization', function (): void {
-    $transport = new WorkerDispositionTestTransport(workerDispositionEnvelope());
-    $serializer = new class implements CommandSerializerInterface {
-        public int $calls = 0;
-        public function serialize(object $command): string { return '{}'; }
-        public function deserialize(string $payload, string $commandClass): object { ++$this->calls; return new stdClass(); }
-    };
-    $worker = workerDispositionWorker(
-        new WorkerDispositionTestBus(),
-        $serializer,
-        $transport,
-        workerDispositionMap(),
-    );
-
-    expect($worker->processOne())->toBeTrue()
-        ->and($serializer->calls)->toBe(0)
+        ->and($serializer->calls)->toBe(1)
         ->and($transport->acks)->toBe(0)
         ->and($transport->rejects)->toBe(1);
 });
@@ -237,5 +213,5 @@ it('rejects a negative worker sleep interval before polling transport', function
         new WorkerDispositionTestTransport(null),
     );
 
-    expect(fn() => $worker->run(-1))->toThrow(InvalidArgumentException::class);
+    expect(fn () => $worker->run(-1))->toThrow(InvalidArgumentException::class);
 });

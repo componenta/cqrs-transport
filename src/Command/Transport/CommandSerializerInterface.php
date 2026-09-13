@@ -21,7 +21,7 @@ interface CommandSerializerInterface
      * Deserializes command from string.
      *
      * @param string $payload Serialized command
-     * @param class-string $commandClass Command FQCN
+     * @param string $commandClass Requested command FQCN; the serializer validates it.
      * @return object Deserialized command
      */
     public function deserialize(string $payload, string $commandClass): object;
