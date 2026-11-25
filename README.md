@@ -110,6 +110,8 @@ Trusted worker dispatch attributes are shallow snapshots taken at construction; 
 
 An error restoring the command, checking its type or transport, restoring context, or dispatching prevents acknowledgement and follows the worker's rejection policy. A serialization failure on the producer prevents sending and is propagated to its caller.
 
+`CommandWorker::run()` polls until `stop()` is requested. A stop request does not interrupt an active delivery; acknowledgement or rejection still finishes. When a stop is requested during an empty poll, the loop exits without another idle sleep.
+
 The serializer is the boundary for constructing supported command objects. The worker's subsequent transport check does not authenticate payload fields or undo constructor effects. Integrity protection for queued messages belongs to the transport/storage boundary.
 
 After successful deserialization and transport validation the worker merges attributes with this precedence:

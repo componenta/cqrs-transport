@@ -14,6 +14,9 @@ use Componenta\CQRS\Command\Transport\TransportException;
 use Componenta\CQRS\Command\Transport\TransportInterface;
 use Componenta\CQRS\Transport\Attribute\Async;
 use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
+use Componenta\CQRS\Command\Transport\WorkerSleepProbe;
+
+require_once dirname(__DIR__, 2) . '/Fixture/WorkerSleep.php';
 
 final class WorkerDispositionTestBus implements CommandBusInterface
 {
@@ -288,5 +291,73 @@ it('preserves the polling exception without dispatching or disposing a nonexiste
         test()->fail('Expected transport polling failure.');
     } catch (RuntimeException $caught) {
         expect($caught)->toBe($failure);
+    }
+});
+
+
+it('stops an idle polling loop without sleeping after a stop request during polling', function (): void {
+    $worker = null;
+    $polls = 0;
+    $waits = [];
+    $transport = $this->createMock(TransportInterface::class);
+    $transport->expects($this->once())->method('get')->willReturnCallback(static function () use (&$worker, &$polls): ?Envelope {
+        ++$polls;
+        $worker->stop();
+        return null;
+    });
+    $transport->expects($this->never())->method('ack');
+    $transport->expects($this->never())->method('reject');
+    $bus = $this->createMock(CommandBusInterface::class);
+    $bus->expects($this->never())->method('dispatch');
+    $worker = new CommandWorker(
+        bus: $bus,
+        serializer: new WorkerDispositionTestSerializer(),
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+    );
+    WorkerSleepProbe::$sleep = static function (int $seconds) use (&$waits): void {
+        $waits[] = $seconds;
+    };
+    try {
+        $worker->run(5);
+        expect($polls)->toBe(1)->and($waits)->toBe([]);
+    } finally {
+        WorkerSleepProbe::$sleep = null;
+    }
+});
+
+it('waits between idle polls and finishes the active delivery before honoring a stop request', function (): void {
+    $envelope = workerDispositionEnvelope();
+    $worker = null;
+    $polls = 0;
+    $waits = [];
+    $transport = $this->createMock(TransportInterface::class);
+    $transport->expects($this->exactly(2))->method('get')->willReturnCallback(static function () use (&$polls, $envelope): ?Envelope {
+        return ++$polls === 1 ? null : $envelope;
+    });
+    $transport->expects($this->once())->method('ack')->with($envelope);
+    $transport->expects($this->never())->method('reject');
+    $bus = $this->createMock(CommandBusInterface::class);
+    $bus->expects($this->once())->method('dispatch')->willReturnCallback(static function (object $command, array $attributes) use (&$worker): OperationInterface {
+        $worker->stop();
+        return Operation::create($command, $attributes);
+    });
+    $worker = new CommandWorker(
+        bus: $bus,
+        serializer: new WorkerDispositionTestSerializer(),
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+        metadata: workerDispositionMetadata(stdClass::class),
+    );
+    WorkerSleepProbe::$sleep = static function (int $seconds) use (&$waits): void {
+        $waits[] = $seconds;
+    };
+    try {
+        $worker->run(3);
+        expect($polls)->toBe(2)->and($waits)->toBe([3]);
+    } finally {
+        WorkerSleepProbe::$sleep = null;
     }
 });

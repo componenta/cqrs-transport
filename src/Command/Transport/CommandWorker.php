@@ -208,7 +208,7 @@ final class CommandWorker
         }
 
         while (!$this->shouldStop) {
-            if (!$this->processOne()) {
+            if (!$this->processOne() && !$this->shouldStop) {
                 sleep($sleep);
             }
         }
