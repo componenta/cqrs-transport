@@ -276,3 +276,30 @@ it('fails fast for unsupported command shapes and unknown payload fields', funct
         JsonRoundTripCommand::class,
     ), 'unknown field'],
 ]);
+
+
+it('restores missing optional constructor fields and rejects missing required fields', function (): void {
+    $serializer = new JsonCommandSerializer();
+    expect($serializer->deserialize(jsonSerializerPayload(['id' => 7]), JsonRoundTripCommand::class))
+        ->toEqual(new JsonRoundTripCommand(7, []))
+        ->and(fn () => $serializer->deserialize(jsonSerializerPayload(['tags' => []]), JsonRoundTripCommand::class))
+        ->toThrow(TransportException::class, "Missing required parameter 'id'");
+});
+
+it('validates an absent field default before calling the constructor', function (): void {
+    JsonDefaultObjectProbe::$constructions = 0;
+    expect(fn () => (new JsonCommandSerializer())->deserialize(
+        jsonSerializerPayload([]),
+        JsonDefaultObjectProbe::class,
+    ))->toThrow(TransportException::class, 'unsupported value');
+    expect(JsonDefaultObjectProbe::$constructions)->toBe(0);
+});
+
+final class JsonDefaultObjectProbe
+{
+    public static int $constructions = 0;
+    public function __construct(public object $data = new stdClass())
+    {
+        ++self::$constructions;
+    }
+}

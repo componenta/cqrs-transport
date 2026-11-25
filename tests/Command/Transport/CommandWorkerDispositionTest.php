@@ -170,11 +170,17 @@ it('rejects an envelope when a custom deserializer returns the wrong command typ
     $transport = new WorkerDispositionTestTransport(
         workerDispositionEnvelope(DateTimeImmutable::class),
     );
-    $worker = workerDispositionWorker(
-        new WorkerDispositionTestBus(),
-        new WorkerDispositionTestSerializer(),
-        $transport,
-        workerDispositionMetadata(DateTimeImmutable::class),
+    $bus = $this->createMock(CommandBusInterface::class);
+    $bus->expects($this->never())->method('dispatch');
+    $metadata = $this->createMock(CommandMetadataProviderInterface::class);
+    $metadata->expects($this->never())->method('get')->willReturn(new Async());
+    $worker = new CommandWorker(
+        bus: $bus,
+        serializer: new WorkerDispositionTestSerializer(),
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+        metadata: $metadata,
     );
 
     expect($worker->processOne())->toBeTrue()

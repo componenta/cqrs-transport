@@ -105,3 +105,20 @@ it('rejects non-finite floating point values', function (float $value): void {
         Operation::create(new stdClass(), ['value' => $value]),
     ))->toThrow(OperationContextSerializationException::class, 'non-finite');
 })->with([NAN, INF, -INF]);
+
+
+it('rejects non-finite decoded values even when their attributes are allowlisted', function (string $payload): void {
+    expect(fn () => (new JsonOperationContextSerializer(['value']))->deserialize($payload))
+        ->toThrow(OperationContextSerializationException::class, 'non-finite');
+})->with([
+    '{"value":1e400}',
+    '{"value":{"nested":-1e400}}',
+]);
+
+it('accepts an empty object and rejects non-object context wire roots', function (): void {
+    $serializer = new JsonOperationContextSerializer(['value']);
+    expect($serializer->deserialize('  {}  '))->toBe([])
+        ->and(fn () => $serializer->deserialize('[]'))->toThrow(OperationContextSerializationException::class, 'JSON object')
+        ->and(fn () => $serializer->deserialize('null'))->toThrow(OperationContextSerializationException::class, 'JSON object')
+        ->and(fn () => $serializer->deserialize(''))->toThrow(OperationContextSerializationException::class, 'JSON object');
+});

@@ -246,7 +246,7 @@ it('keeps sync execution mode authoritative over worker dispatch attributes', fu
     ]);
 });
 
-it('rejects reserved attributes returned by a custom context serializer', function (): void {
+it('rejects invalid or reserved attributes returned by a custom context serializer', function (array $attributes): void {
     $envelope = new Envelope('operation-id', stdClass::class, '{}', 'receipt-id', '{}');
     $bus = new class () implements CommandBusInterface {
         public int $calls = 0;
@@ -266,14 +266,15 @@ it('rejects reserved attributes returned by a custom context serializer', functi
             return new stdClass();
         }
     };
-    $context = new class () implements OperationContextSerializerInterface {
+    $context = new class ($attributes) implements OperationContextSerializerInterface {
+        public function __construct(private readonly array $attributes) {}
         public function serialize(OperationInterface $operation): string
         {
             return '{}';
         }
         public function deserialize(string $payload): array
         {
-            return ['__execution_mode' => ExecutionMode::ASYNC];
+            return $this->attributes;
         }
     };
     $transport = new class ($envelope) implements TransportInterface {
@@ -314,7 +315,13 @@ it('rejects reserved attributes returned by a custom context serializer', functi
         ->and($bus->calls)->toBe(0)
         ->and($transport->acks)->toBe(0)
         ->and($transport->rejects)->toBe(1);
-});
+})->with([
+    'execution mode' => [['__execution_mode' => ExecutionMode::ASYNC]],
+    'policy bypass' => [['__skip_policy' => true]],
+    'original operation identifier' => [['__original_operation_id' => 'forged']],
+    'numeric key' => [[0 => 'invalid']],
+    'blank key' => [[" \t" => 'invalid']],
+]);
 
 it('rejects empty worker transport names at construction', function (): void {
     $transport = new class () implements TransportInterface {
