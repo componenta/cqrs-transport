@@ -215,3 +215,78 @@ it('rejects a negative worker sleep interval before polling transport', function
 
     expect(fn () => $worker->run(-1))->toThrow(InvalidArgumentException::class);
 });
+
+it('does not alter delivery disposition when a logger throws', function (string $scenario): void {
+    $processingFailure = new RuntimeException('handler failed');
+    $dispositionFailure = new RuntimeException('disposition failed');
+    $transport = new WorkerDispositionTestTransport(
+        workerDispositionEnvelope(),
+        ackFailure: $scenario === 'ack failure' ? $dispositionFailure : null,
+        rejectFailure: $scenario === 'reject failure' ? $dispositionFailure : null,
+    );
+    $logger = new class extends \Psr\Log\AbstractLogger {
+        public int $calls = 0;
+        public function log($level, string|Stringable $message, array $context = []): void
+        {
+            ++$this->calls;
+            throw new RuntimeException('logger unavailable');
+        }
+    };
+    $worker = new CommandWorker(
+        bus: new WorkerDispositionTestBus(in_array($scenario, ['rejected', 'reject failure'], true) ? $processingFailure : null),
+        serializer: new WorkerDispositionTestSerializer(),
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+        metadata: workerDispositionMetadata(stdClass::class),
+        logger: $logger,
+    );
+
+    if ($scenario === 'ack failure') {
+        try {
+            $worker->processOne();
+            test()->fail('Expected acknowledgement failure.');
+        } catch (TransportException $caught) {
+            expect($caught->getPrevious())->toBe($dispositionFailure);
+        }
+    } elseif ($scenario === 'reject failure') {
+        try {
+            $worker->processOne();
+            test()->fail('Expected rejection failure.');
+        } catch (TransportDispositionException $caught) {
+            expect($caught->processingFailure)->toBe($processingFailure)
+                ->and($caught->dispositionFailure)->toBe($dispositionFailure);
+        }
+    } else {
+        expect($worker->processOne())->toBeTrue();
+    }
+    expect($logger->calls)->toBe(1)
+        ->and($transport->acks)->toBe(in_array($scenario, ['acknowledged', 'ack failure'], true) ? 1 : 0)
+        ->and($transport->rejects)->toBe(in_array($scenario, ['rejected', 'reject failure'], true) ? 1 : 0)
+        ->and($worker->processOne())->toBeFalse();
+})->with(['acknowledged', 'rejected', 'ack failure', 'reject failure']);
+
+it('preserves the polling exception without dispatching or disposing a nonexistent delivery', function (): void {
+    $failure = new RuntimeException('transport unavailable');
+    $transport = $this->createMock(TransportInterface::class);
+    $transport->expects($this->once())->method('get')->willThrowException($failure);
+    $transport->expects($this->never())->method('ack');
+    $transport->expects($this->never())->method('reject');
+    $bus = $this->createMock(CommandBusInterface::class);
+    $bus->expects($this->never())->method('dispatch');
+    $serializer = $this->createMock(CommandSerializerInterface::class);
+    $serializer->expects($this->never())->method('deserialize');
+    $worker = new CommandWorker(
+        bus: $bus,
+        serializer: $serializer,
+        contextSerializer: new JsonOperationContextSerializer(),
+        transport: $transport,
+        transportName: 'default',
+    );
+    try {
+        $worker->processOne();
+        test()->fail('Expected transport polling failure.');
+    } catch (RuntimeException $caught) {
+        expect($caught)->toBe($failure);
+    }
+});
