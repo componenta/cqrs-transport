@@ -170,10 +170,22 @@ it('rejects an envelope when a custom deserializer returns the wrong command typ
     $transport = new WorkerDispositionTestTransport(
         workerDispositionEnvelope(DateTimeImmutable::class),
     );
-    $bus = $this->createMock(CommandBusInterface::class);
-    $bus->expects($this->never())->method('dispatch');
-    $metadata = $this->createMock(CommandMetadataProviderInterface::class);
-    $metadata->expects($this->never())->method('get')->willReturn(new Async());
+    $bus = new class implements CommandBusInterface {
+        public int $calls = 0;
+        public function dispatch(object $command, array $attributes = []): OperationInterface
+        {
+            ++$this->calls;
+            return Operation::create($command, $attributes);
+        }
+    };
+    $metadata = new class implements CommandMetadataProviderInterface {
+        public int $calls = 0;
+        public function get(object|string $command, string $attribute): ?object
+        {
+            ++$this->calls;
+            return new Async();
+        }
+    };
     $worker = new CommandWorker(
         bus: $bus,
         serializer: new WorkerDispositionTestSerializer(),
@@ -184,6 +196,8 @@ it('rejects an envelope when a custom deserializer returns the wrong command typ
     );
 
     expect($worker->processOne())->toBeTrue()
+        ->and($metadata->calls)->toBe(0)
+        ->and($bus->calls)->toBe(0)
         ->and($transport->acks)->toBe(0)
         ->and($transport->rejects)->toBe(1);
 });
