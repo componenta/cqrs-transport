@@ -92,6 +92,7 @@ it('re-dispatches transported commands with restored operation context and worke
         }
     };
 
+    $tenant = 'worker';
     $worker = new CommandWorker(
         bus: $bus,
         serializer: $serializer,
@@ -99,8 +100,9 @@ it('re-dispatches transported commands with restored operation context and worke
         transport: $transport,
         transportName: 'default',
         metadata: workerTestMetadata('default', stdClass::class),
-        dispatchAttributes: ['tenant' => 'worker'],
+        dispatchAttributes: ['tenant' => &$tenant],
     );
+    $tenant = 'changed after construction';
 
     expect($worker->processOne())->toBeTrue()
         ->and($bus->command)->toBe($command)

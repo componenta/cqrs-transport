@@ -42,12 +42,14 @@ final class CommandWorker
             throw new InvalidArgumentException('Worker transport name cannot be empty or whitespace.');
         }
 
-        foreach ($dispatchAttributes as $attribute => $_) {
+        $snapshot = [];
+        foreach ($dispatchAttributes as $attribute => $value) {
             self::assertAttributeName($attribute, 'Worker dispatch');
+            $snapshot[$attribute] = $value;
         }
 
         $this->logger = $logger ?? new NullLogger();
-        $this->dispatchAttributes = $dispatchAttributes;
+        $this->dispatchAttributes = $snapshot;
     }
 
     /** @phpstan-impure */

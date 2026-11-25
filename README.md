@@ -84,7 +84,7 @@ $contextSerializer = new JsonOperationContextSerializer([
 
 Arrays must preserve their internal pointer and next integer append index through JSON. JSON restores nonempty arrays with the pointer at the first element; other pointer positions are rejected, including the past-end state. This also applies to nested arrays. For example, deleting the last numeric element can leave hidden append state that JSON cannot represent. Both command and context serializers reject this state before sending; command reconstruction is checked as well. Validation uses copies and leaves the original arrays unchanged. Use a custom serializer when this state is meaningful, or explicitly normalize arrays in application code when that is the intended behaviour.
 
-Only listed attributes cross the async boundary. Attribute names obey the same string-key contract as `Operation`; numeric-string names that PHP would convert to integer array keys are rejected. Values must be JSON-safe scalars/arrays; arbitrary objects, non-finite floats, and PHP references in transported attributes or nested arrays are rejected. The serializer preserves exact integer/float wire types and signed zero, rejects integer tokens outside the PHP integer range, and fails closed when PHP JSON precision would alter context data.
+Only listed attributes cross the async boundary. Attribute names obey the same string-key contract as `Operation`; numeric-string names that PHP would convert to integer array keys are rejected. Values must be JSON-safe scalars/arrays; arbitrary objects, non-finite floats, and PHP references actually present in transported attributes or nested arrays are rejected. The serializer observes the operation's exposed attributes, not the caller's original array before an operation factory snapshots it. The serializer preserves exact integer/float wire types and signed zero, rejects integer tokens outside the PHP integer range, and fails closed when PHP JSON precision would alter context data.
 
 Attribute names beginning with `__` are reserved for trusted runtime state and cannot be allowlisted. The worker independently rejects reserved attributes even when a custom context serializer is used. The default serializer has an empty allowlist, so application attributes remain process-local unless deliberately declared transportable.
 
@@ -105,6 +105,8 @@ $worker = new CommandWorker(
 ```
 
 The default metadata provider is `ReflectionCommandMetadataProvider`; a custom provider can be passed as `metadata:`. The producer middleware reads the same attribute contract. No registration of metadata classes or prepared handler map is needed.
+
+Trusted worker dispatch attributes are shallow snapshots taken at construction; top-level PHP references are detached. Nested objects and nested references are not deep-copied.
 
 An error restoring the command, checking its type or transport, restoring context, or dispatching prevents acknowledgement and follows the worker's rejection policy. A serialization failure on the producer prevents sending and is propagated to its caller.
 

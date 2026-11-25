@@ -6,7 +6,6 @@ use Componenta\CQRS\Command\CommandBus;
 use Componenta\CQRS\Command\Metadata\ReflectionCommandMetadataProvider;
 use Componenta\CQRS\Command\Middleware\OperationHandlerInterface;
 use Componenta\CQRS\Command\Middleware\TransportMiddleware;
-use Componenta\CQRS\Command\Operation;
 use Componenta\CQRS\Command\OperationInterface;
 use Componenta\CQRS\Command\Transport\JsonCommandSerializer;
 use Componenta\CQRS\Command\Transport\JsonOperationContextSerializer;
@@ -14,6 +13,7 @@ use Componenta\CQRS\Command\Transport\OperationContextSerializationException;
 use Componenta\CQRS\Command\Transport\TransportInterface;
 use Componenta\CQRS\Command\Transport\TransportRegistry;
 use Componenta\CQRS\Transport\Attribute\Async;
+use PHPUnit\Framework\MockObject\Runtime\PropertyHook;
 
 #[Async]
 final readonly class JsonContextReferenceCommand
@@ -49,17 +49,27 @@ it('rejects transportable context references before sending or executing a comma
         $value = 1;
         return ['data' => ['nested' => ['first' => &$value, 'second' => &$value]]];
     }],
-    'between attributes' => [static function (): array {
-        $value = 1;
-        return ['first' => &$value, 'second' => &$value];
-    }],
 ]);
 
+
+it('rejects actual top-level references exposed by an operation implementation', function (): void {
+    $value = 1;
+    $attributes = ['first' => &$value, 'second' => &$value];
+    // CQRS 5 snapshots caller-owned top-level references. The serializer
+    // must still reject real references from a custom OperationInterface.
+    $operation = $this->createStub(OperationInterface::class);
+    $operation->method(PropertyHook::get('attributes'))->willReturn($attributes);
+
+    expect(ReflectionReference::fromArrayElement($operation->attributes, 'first'))->not->toBeNull()
+        ->and(fn () => (new JsonOperationContextSerializer(['first', 'second']))->serialize($operation))
+        ->toThrow(OperationContextSerializationException::class, 'PHP reference');
+});
 
 it('preserves ordinary context values and ignores references outside the allowlist', function (): void {
     $local = 1;
     $sharedValue = ['value' => 1];
-    $operation = Operation::create(new JsonContextReferenceCommand(), [
+    $operation = $this->createStub(OperationInterface::class);
+    $operation->method(PropertyHook::get('attributes'))->willReturn([
         'data' => ['first' => $sharedValue, 'second' => $sharedValue],
         'local_first' => &$local,
         'local_second' => &$local,

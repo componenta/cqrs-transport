@@ -18,11 +18,11 @@ jobs:
         php: ['8.4', '8.5']
     steps:
       - uses: actions/checkout@v7
-      - name: Checkout current CQRS v4 source
+      - name: Checkout released CQRS v4 source
         uses: actions/checkout@v7
         with:
           repository: componenta/cqrs
-          ref: main
+          ref: v4.0.0
           path: .ci/cqrs
       - uses: shivammathur/setup-php@v2
         with:
@@ -32,7 +32,7 @@ jobs:
       - name: Configure Composer authentication
         run: composer config --global github-oauth.github.com "${{ github.token }}"
       - run: composer validate --strict
-      - name: Use current CQRS v4 source
+      - name: Use released CQRS v4 source
         run: >-
           composer config --json repositories.componenta-cqrs
           '{"type":"path","url":".ci/cqrs","options":{"versions":{"componenta/cqrs":"4.0.0"}}}'
