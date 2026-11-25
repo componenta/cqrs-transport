@@ -206,3 +206,30 @@ it('uses JsonCommandSerializer as a broad fallback when it is ordered last', fun
 
     expect($restored)->toEqual($other);
 });
+
+
+it('requires each of the two serializer contracts rather than accepting either one alone', function (): void {
+    $serializationOnly = $this->createStub(CommandSerializerInterface::class);
+    $supportOnly = $this->createStub(CommandSerializerSupportInterface::class);
+
+    expect(fn () => new CompositeCommandSerializer([$serializationOnly]))
+        ->toThrow(InvalidArgumentException::class, 'must implement both')
+        ->and(fn () => new CompositeCommandSerializer([$supportOnly]))
+        ->toThrow(InvalidArgumentException::class, 'must implement both');
+});
+
+it('reports support consistently for instances and classes and refuses an unsupported deserialization', function (): void {
+    $special = new CompositeRecordingSerializer(
+        CompositeSpecialCommand::class,
+        'special',
+        new CompositeSpecialCommand(1),
+    );
+    $composite = new CompositeCommandSerializer([$special]);
+    expect($composite->supportsCommand(new CompositeSpecialCommand(1)))->toBeTrue()
+        ->and($composite->supportsCommand(CompositeSpecialCommand::class))->toBeTrue()
+        ->and($composite->supportsCommand(new CompositeOtherCommand(2)))->toBeFalse()
+        ->and($composite->supportsCommand(CompositeOtherCommand::class))->toBeFalse()
+        ->and(fn () => $composite->deserialize('wire', CompositeOtherCommand::class))
+        ->toThrow(TransportException::class, 'No command serializer supports')
+        ->and($special->deserialized)->toBe([]);
+});

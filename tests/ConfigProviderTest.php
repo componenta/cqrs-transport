@@ -70,3 +70,25 @@ it('wires transport and serializers without any map registration', function (): 
         ->and(json_decode($transport->sent->payload, true))->toBe(['__componenta_cqrs' => 1, 'data' => ['id' => 7]])
         ->and($transport->sent->contextPayload)->toBe('{}');
 });
+
+
+it('rejects each incorrectly configured transport factory dependency', function (string $service): void {
+    $factory = new \Componenta\CQRS\Command\Factory\TransportMiddlewareFactory();
+    $services = [
+        TransportRegistryInterface::class => new TransportRegistry(),
+        CommandSerializerInterface::class => new JsonCommandSerializer(),
+        \Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface::class
+            => new \Componenta\CQRS\Command\Metadata\ReflectionCommandMetadataProvider(),
+        \Componenta\CQRS\Command\Transport\OperationContextSerializerInterface::class
+            => new \Componenta\CQRS\Command\Transport\JsonOperationContextSerializer(),
+    ];
+    $services[$service] = new stdClass();
+    $container = $this->createStub(\Psr\Container\ContainerInterface::class);
+    $container->method('get')->willReturnCallback(static fn (string $id): mixed => $services[$id]);
+    expect(fn () => $factory($container))->toThrow(LogicException::class, $service);
+})->with([
+    TransportRegistryInterface::class,
+    CommandSerializerInterface::class,
+    \Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface::class,
+    \Componenta\CQRS\Command\Transport\OperationContextSerializerInterface::class,
+]);
