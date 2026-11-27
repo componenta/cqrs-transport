@@ -1,8 +1,17 @@
 # Componenta CQRS Transport
 
-Async transport middleware, transport contracts, command serializers, operation-context serialization, registry, and worker for `componenta/cqrs` v4 commands marked with `#[Componenta\CQRS\Transport\Attribute\Async]`.
+Async transport middleware, transport contracts, command serializers, operation-context serialization, registry, and worker for `componenta/cqrs` commands marked with `#[Componenta\CQRS\Transport\Attribute\Async]`.
 
-`main` is the transport v5 line and requires CQRS v4.
+## Compatibility
+
+Version 5.1 supports CQRS 4 or 5 and Config 3 or 4, with the existing PHP 8.4
+runtime floor. The update expands dependency compatibility without changing
+transport, middleware, envelope or serializer APIs.
+
+Transport metadata, serialization and worker dispatch remain runtime operations.
+The package has no App build dependency. CQRS App's prepared registration map can
+be used by the producer and worker while preserving retry, policy, locking and
+transaction middleware behavior.
 
 ```bash
 composer require componenta/cqrs-transport
